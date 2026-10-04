@@ -1,0 +1,222 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:flutter_101repairshop/core/theme/app_theme.dart';
+import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
+import 'package:flutter_101repairshop/features/profile/data/customer_repository.dart';
+import 'package:flutter_101repairshop/features/profile/presentation/edit_profile_screen.dart';
+import 'package:flutter_101repairshop/features/profile/presentation/profile_screen.dart';
+import 'package:flutter_101repairshop/features/shared/models/customer.dart';
+
+const _originalAddress =
+    'Unit 1204, Building Three, 123 Mabini Street, Barangay San Antonio, '
+    'Buhangin District, Davao City, Davao del Sur, Philippines 8000';
+const _multilineAddress =
+    'Unit 8, 45 Jacinto Street\nBarangay San Pedro\nDavao City, 8000';
+
+class _Customers extends CustomerRepository {
+  Customer current = Customer(
+    id: 'customer-id',
+    authId: 'auth-id',
+    firstName: 'Alex',
+    lastName: 'Reyes',
+    email: 'alex.reyes@example.com',
+    phoneNo: '09171234567',
+    address: _originalAddress,
+    profilePicture: 'https://example.com/avatars/customer.png',
+    createdAt: DateTime.utc(2024, 1, 2),
+    updatedAt: DateTime.utc(2025, 3, 4),
+  );
+  final saved = <Customer>[];
+
+  @override
+  Future<Customer?> getCurrentCustomer() async {
+    return current;
+  }
+
+  @override
+  Future<void> updateProfile(Customer customer) async {
+    saved.add(customer);
+    current = customer;
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    SharedPreferences.setMockInitialValues({});
+    await Supabase.initialize(
+      url: 'http://127.0.0.1:54321',
+      publishableKey: 'test-key',
+      debug: false,
+    );
+  });
+
+  tearDownAll(() async {
+    await Supabase.instance.dispose();
+  });
+
+  Finder addressField() => find.descendant(
+    of: find.widgetWithText(AppTextField, 'Address (required)'),
+    matching: find.byType(TextFormField),
+  );
+
+  Future<void> pumpProfile(
+    WidgetTester tester,
+    _Customers customers, {
+    Size size = const Size(380, 800),
+    double textScale = 1,
+    bool dark = false,
+  }) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final router = GoRouter(
+      initialLocation: '/profile',
+      routes: [
+        GoRoute(
+          path: '/profile',
+          builder: (context, state) => const ProfileScreen(),
+        ),
+        GoRoute(
+          path: '/profile/edit',
+          builder: (context, state) => const EditProfileScreen(),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [customerRepositoryProvider.overrideWithValue(customers)],
+        child: MaterialApp.router(
+          routerConfig: router,
+          theme: dark ? AppTheme.dark : AppTheme.light,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> tapVisible(WidgetTester tester, Finder finder) async {
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'Saving a multiline address preserves customer data and refreshes the profile',
+    (tester) async {
+      final customers = _Customers();
+      final original = customers.current;
+      await pumpProfile(tester, customers);
+      expect(find.text(_originalAddress), findsOneWidget);
+      await tapVisible(tester, find.text('Edit address'));
+
+      await tester.ensureVisible(addressField());
+      await tester.enterText(addressField(), '  $_multilineAddress  ');
+      await tapVisible(tester, find.text('Save changes'));
+
+      expect(customers.saved, hasLength(1));
+      final saved = customers.saved.single;
+      expect(saved.address, _multilineAddress);
+      expect(saved.id, original.id);
+      expect(saved.authId, original.authId);
+      expect(saved.profilePicture, original.profilePicture);
+      expect(saved.createdAt, original.createdAt);
+      expect(saved.updatedAt, original.updatedAt);
+      expect(saved.firstName, original.firstName);
+      expect(saved.lastName, original.lastName);
+      expect(saved.email, original.email);
+      expect(saved.phoneNo, original.phoneNo);
+      expect(find.byType(EditProfileScreen), findsNothing);
+      expect(find.text(_multilineAddress), findsOneWidget);
+      expect(find.text(_originalAddress), findsNothing);
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Clearing the required address shows validation and preserves saved data',
+    (tester) async {
+      final customers = _Customers();
+      await pumpProfile(tester, customers);
+      await tapVisible(tester, find.text('Edit address'));
+      await tester.ensureVisible(addressField());
+      await tester.enterText(addressField(), '  \n  ');
+      await tapVisible(tester, find.text('Save changes'));
+
+      expect(customers.saved, isEmpty);
+      expect(customers.current.address, _originalAddress);
+      expect(find.byType(EditProfileScreen), findsOneWidget);
+      expect(
+        find.text('Enter your address or use your current location.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Profile and address editor fit 320px with large text in dark mode',
+    (tester) async {
+      await pumpProfile(
+        tester,
+        _Customers(),
+        size: const Size(320, 720),
+        textScale: 1.5,
+        dark: true,
+      );
+      await tester.ensureVisible(find.text(_originalAddress));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tapVisible(tester, find.text('Edit address'));
+
+      expect(find.text('Personal information'), findsOneWidget);
+      await tester.ensureVisible(addressField());
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextFormField>(addressField()).controller!.text,
+        _originalAddress,
+      );
+      await tester.ensureVisible(find.text('Save changes'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('Profile validation follows visible field order', (tester) async {
+    final customers = _Customers();
+    await pumpProfile(tester, customers, size: const Size(320, 720));
+    await tapVisible(tester, find.text('Edit address'));
+    final firstName = find.descendant(
+      of: find.widgetWithText(AppTextField, 'First name'),
+      matching: find.byType(TextFormField),
+    );
+    await tester.ensureVisible(firstName);
+    await tester.enterText(firstName, ' ');
+    await tester.ensureVisible(addressField());
+    await tester.enterText(addressField(), ' ');
+    await tester.pumpAndSettle();
+    await tapVisible(tester, find.text('Save changes'));
+    final input = tester.widget<EditableText>(
+      find.descendant(of: firstName, matching: find.byType(EditableText)),
+    );
+    expect(input.focusNode.hasFocus, isTrue);
+    expect(find.text('Enter your first name').hitTestable(), findsOneWidget);
+    expect(customers.saved, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+}
