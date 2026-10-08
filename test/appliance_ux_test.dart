@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
 import 'package:flutter_101repairshop/core/widgets/app_button.dart';
+import 'package:flutter_101repairshop/core/widgets/app_card.dart';
 import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
 import 'package:flutter_101repairshop/features/profile/data/customer_repository.dart';
 import 'package:flutter_101repairshop/features/profile/presentation/add_appliance_screen.dart';
@@ -174,8 +175,11 @@ void main() {
       await tapVisible(tester, addButton());
 
       expect(
-        find.text(
-          'Could not add your appliance. Your details are still here. Check your connection and try again.',
+        find.descendant(
+          of: find.byType(AppCard),
+          matching: find.text(
+            'Could not add your appliance. Your details are still here. Please try again.',
+          ),
         ),
         findsOneWidget,
       );
@@ -193,11 +197,20 @@ void main() {
       );
       expect(customers.submissions, hasLength(1));
 
+      // Let the transient notification expire before retrying the form.
+      // The inline error remains visible and the draft stays intact.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
       final pending = Completer<void>();
       customers
         ..failSave = false
         ..saving = pending;
-      await tester.ensureVisible(addButton());
+      await Scrollable.ensureVisible(
+        tester.element(addButton()),
+        alignment: 0.5,
+      );
+      await tester.pumpAndSettle();
+      expect(addButton().hitTestable(), findsOneWidget);
       await tester.tap(addButton());
       await tester.pump();
       expect(find.text('Adding appliance...'), findsOneWidget);
@@ -259,7 +272,7 @@ void main() {
             modelNo: 'WW90T554DAN',
             serialNo: '123456789',
             category: 'Washing Machine',
-            applianceSize: 'Extra Large',
+            applianceSize: 'Large',
           ),
         ];
       await pumpAppliances(
@@ -295,10 +308,15 @@ void main() {
 
       final size = find.byType(DropdownButtonFormField<String>).last;
       await tapVisible(tester, size);
-      await tapVisible(tester, find.text('Extra Large').last);
+      await tapVisible(tester, find.text('Large').last);
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(addButton());
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(field('Brand (required)'));
+      await tester.enterText(field('Brand (required)'), 'Samsung');
+      await tester.ensureVisible(field('Product (required)'));
+      await tester.enterText(field('Product (required)'), 'Washing machine');
+      await tapVisible(tester, addButton());
+      expect(customers.submissions.single['category'], 'Washing Machine');
+      expect(customers.submissions.single['appliance_size'], 'Large');
       expect(tester.takeException(), isNull);
     },
   );

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
+import '../../../core/constants/statuses.dart';
+import '../../../core/utils/app_dates.dart';
+import '../../../core/utils/load_errors.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -27,7 +30,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<ServiceReport> _repairs = [];
   List<Appointment> _appointments = [];
   bool _isLoading = true;
-  bool _hasError = false;
+  Object? _profileError;
+  Object? _repairsError;
+  Object? _appointmentsError;
+  bool _profileLoaded = false;
+  bool _repairsLoaded = false;
+  bool _appointmentsLoaded = false;
   bool _hasLoaded = false;
   int _requestId = 0;
 
@@ -40,57 +48,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _loadData() async {
     if (!mounted) return;
     final requestId = ++_requestId;
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-    });
-    try {
-      final results = await Future.wait([
-        ref.read(customerRepositoryProvider).getCurrentCustomer(),
-        ref.read(repairsRepositoryProvider).getRepairs(),
-        ref.read(appointmentsRepositoryProvider).getAppointments(),
-      ]).timeout(const Duration(seconds: 20));
-      if (!mounted || requestId != _requestId) return;
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      const finished = {
-        'completed',
-        'cancelled',
-        'canceled',
-        'released',
-        'closed',
-      };
-      final appointments =
-          (results[2] as List<Appointment>)
-              .where(
-                (a) =>
-                    !a.appointmentDate.isBefore(today) &&
-                    !finished.contains(a.status?.trim().toLowerCase()),
-              )
-              .toList()
-            ..sort((a, b) => a.appointmentDate.compareTo(b.appointmentDate));
-      setState(() {
-        _hasLoaded = true;
-        _customer = results[0] as Customer?;
-        _repairs = (results[1] as List<ServiceReport>)
-            .where(
-              (r) =>
-                  r.datePulledOut == null &&
-                  !finished.contains(r.status?.trim().toLowerCase()),
-            )
-            .toList();
-        _appointments = appointments;
-        _isLoading = false;
-      });
-    } catch (_) {
-      if (mounted && requestId == _requestId) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-        });
+    setState(() => _isLoading = true);
+    final customerRepository = ref.read(customerRepositoryProvider);
+    final repairsRepository = ref.read(repairsRepositoryProvider);
+    final appointmentsRepository = ref.read(appointmentsRepositoryProvider);
+
+    Future<void> loadSection<T>(
+      String section,
+      Future<T> Function() request,
+      void Function(T) apply,
+      void Function(Object?) setError,
+    ) async {
+      try {
+        final value = await request().timeout(const Duration(seconds: 20));
+        if (!mounted || requestId != _requestId) return;
+        apply(value);
+        setError(null);
+      } catch (error) {
+        // Keep the exception type for accurate guidance; avoid logging profile
+        // fields or request tokens. One failed section must not hide the others.
+        debugPrint(
+          'Dashboard $section failed: ${loadFailureDiagnostic(error)}',
+        );
+        if (!mounted || requestId != _requestId) return;
+        setError(error);
       }
     }
+
+    await Future.wait([
+      loadSection<Customer?>('profile', customerRepository.getCurrentCustomer, (
+        customer,
+      ) {
+        _customer = customer;
+        _profileLoaded = true;
+      }, (error) => _profileError = error),
+      loadSection<List<ServiceReport>>(
+        'repairs',
+        repairsRepository.getRepairs,
+        (repairs) {
+          _repairs = repairs
+              .where(
+                (report) =>
+                    report.datePulledOut == null && !_isFinished(report.status),
+              )
+              .toList();
+          _repairsLoaded = true;
+        },
+        (error) => _repairsError = error,
+      ),
+      loadSection<List<Appointment>>(
+        'appointments',
+        appointmentsRepository.getAppointments,
+        (appointments) {
+          final today = AppDates.manilaToday();
+          _appointments =
+              appointments
+                  .where(
+                    (appointment) =>
+                        !appointment.appointmentDate.isBefore(today) &&
+                        !_isFinished(appointment.status),
+                  )
+                  .toList()
+                ..sort(
+                  (a, b) => a.appointmentDate.compareTo(b.appointmentDate),
+                );
+          _appointmentsLoaded = true;
+        },
+        (error) => _appointmentsError = error,
+      ),
+    ]);
+    if (!mounted || requestId != _requestId) return;
+    setState(() {
+      _hasLoaded = true;
+      _isLoading = false;
+    });
   }
+
+  bool _isFinished(String? status) => const {
+    'completed',
+    'cancelled',
+    'canceled',
+    'released',
+    'closed',
+  }.contains(status?.trim().toLowerCase());
 
   Future<void> _openAndRefresh(String route) async {
     await context.push(route);
@@ -172,59 +212,72 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      if (_hasError) ...[
-                        _buildError(),
-                        const SizedBox(height: 24),
-                      ],
+
                       if (_hasLoaded) ...[
-                        if (addressMissing) ...[
+                        if (_profileError != null) ...[
+                          _buildError('profile', _profileError!),
+                          const SizedBox(height: 24),
+                        ],
+                        if (_profileLoaded && addressMissing) ...[
                           _buildAddressCard(),
                           const SizedBox(height: 24),
                         ],
-                        _sectionTitle(
-                          'Upcoming appointments',
-                          _appointments.length,
-                          '/appointments',
-                        ),
-                        const SizedBox(height: 12),
-                        if (_appointments.isEmpty)
-                          _emptyState(
-                            Icons.event_available_outlined,
-                            'No appointments coming up',
-                            'Choose a date and time when you need a repair.',
-                          )
-                        else
-                          ..._appointments
-                              .take(3)
-                              .map(
-                                (a) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _buildAppointmentCard(a),
+                        if (_appointmentsError != null) ...[
+                          _buildError('appointments', _appointmentsError!),
+                          const SizedBox(height: 12),
+                        ],
+                        if (_appointmentsLoaded) ...[
+                          _sectionTitle(
+                            'Upcoming appointments',
+                            _appointments.length,
+                            '/appointments',
+                          ),
+                          const SizedBox(height: 12),
+                          if (_appointments.isEmpty)
+                            _emptyState(
+                              Icons.event_available_outlined,
+                              'No appointments coming up',
+                              'Choose a date and time when you need a repair.',
+                            )
+                          else
+                            ..._appointments
+                                .take(3)
+                                .map(
+                                  (appointment) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildAppointmentCard(appointment),
+                                  ),
                                 ),
-                              ),
+                        ],
                         const SizedBox(height: 24),
-                        _sectionTitle(
-                          'Active repairs',
-                          _repairs.length,
-                          '/repairs',
-                        ),
-                        const SizedBox(height: 12),
-                        if (_repairs.isEmpty)
-                          _emptyState(
-                            Icons.build_outlined,
-                            'No active repairs',
-                            'Your repair progress will appear here.',
-                          )
-                        else
-                          ..._repairs
-                              .take(3)
-                              .map(
-                                (r) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _buildRepairCard(r),
+                        if (_repairsError != null) ...[
+                          _buildError('repairs', _repairsError!),
+                          const SizedBox(height: 12),
+                        ],
+                        if (_repairsLoaded) ...[
+                          _sectionTitle(
+                            'Active repairs',
+                            _repairs.length,
+                            '/repairs',
+                          ),
+                          const SizedBox(height: 12),
+                          if (_repairs.isEmpty)
+                            _emptyState(
+                              Icons.build_outlined,
+                              'No active repairs',
+                              'Your repair progress will appear here.',
+                            )
+                          else
+                            ..._repairs
+                                .take(3)
+                                .map(
+                                  (report) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildRepairCard(report),
+                                  ),
                                 ),
-                              ),
-                        if (!addressMissing) ...[
+                        ],
+                        if (_profileLoaded && !addressMissing) ...[
                           const SizedBox(height: 24),
                           _buildAddressCard(),
                         ],
@@ -435,7 +488,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Text('SR-${report.id}', style: AppTextStyles.bodyMedium),
                     const SizedBox(width: 8),
-                    StatusBadge(status: report.status ?? 'Pending'),
+                    StatusBadge(status: RepairStatus.normalize(report.status)),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -452,7 +505,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 if (report.dateIn != null) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Received ${DateFormat('MMM d, yyyy').format(report.dateIn!)}',
+                    'Received ${AppDates.format(report.dateIn!, 'MMM d, yyyy')}',
                     style: AppTextStyles.caption.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -487,12 +540,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Text(appointment.title, style: AppTextStyles.bodyMedium),
                     const SizedBox(width: 8),
-                    StatusBadge(status: appointment.status ?? 'Pending'),
+                    StatusBadge(status: appointment.displayStatus),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  DateFormat('EEEE, MMM d').format(appointment.appointmentDate),
+                  AppDates.format(appointment.appointmentDate, 'EEEE, MMM d'),
                   style: AppTextStyles.bodySmall.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -542,18 +595,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildError() {
+  Widget _buildError(String section, Object error) {
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'We could not load your dashboard',
+          Text(
+            'We could not load your $section',
             style: AppTextStyles.heading3,
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Check your connection and try again.',
+          Text(
+            friendlyError(error, fallback: 'Please try again in a moment.'),
             style: AppTextStyles.body,
           ),
           const SizedBox(height: 12),

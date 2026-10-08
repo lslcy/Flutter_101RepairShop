@@ -293,7 +293,7 @@ void main() {
       expect(appointments.bookings.single, {
         'title': 'Air conditioner is leaking',
         'appliance_name': 'Samsung split-type AC',
-        'appointment_date': pickedDate.toIso8601String(),
+        'appointment_date': pickedDate.toIso8601String().split('T').first,
         'time_slot': AppConstants.timeSlots.first,
         'notes': 'Water drips after ten minutes.',
         'status': 'Pending',

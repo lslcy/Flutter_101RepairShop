@@ -12,6 +12,10 @@ class AppDates {
 
   static const manilaOffset = Duration(hours: 8);
   static final _dateOnly = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+  static final _hasZone = RegExp(
+    r'(Z|[+-]\d{2}(:?\d{2})?)$',
+    caseSensitive: false,
+  );
   static final _isoDate = DateFormat('yyyy-MM-dd');
 
   /// Parses a `timestamptz` value and returns it in device-local time.
@@ -31,6 +35,33 @@ class AppDates {
       ).subtract(manilaOffset).toLocal();
     }
     return DateTime.tryParse(text)?.toLocal();
+  }
+
+  /// Parses a Laravel `timestamp without time zone` value. These columns
+  /// (`service_details`, `part_service_report`, `service_progress_comments`)
+  /// store UTC wall-clock time with no offset, so a missing offset is read as
+  /// UTC instead of device-local time. Returns device-local time.
+  static DateTime? parseUtcTimestamp(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) {
+      if (value.isUtc) return value.toLocal();
+      return DateTime.utc(
+        value.year,
+        value.month,
+        value.day,
+        value.hour,
+        value.minute,
+        value.second,
+        value.millisecond,
+        value.microsecond,
+      ).toLocal();
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    if (_dateOnly.hasMatch(text) || _hasZone.hasMatch(text)) {
+      return parseTimestamp(text);
+    }
+    return DateTime.tryParse('${text.replaceFirst(' ', 'T')}Z')?.toLocal();
   }
 
   /// Parses a plain `yyyy-MM-dd` date (time and timezone are ignored).
@@ -62,6 +93,11 @@ class AppDates {
 
   /// Today's calendar date in Manila.
   static DateTime manilaToday() => manilaDateOf(DateTime.now());
+
+  /// True when a plain calendar [date] is before today's Manila date
+  /// (e.g. an overdue `payment_due`).
+  static bool isPastManilaDate(DateTime date) =>
+      DateTime(date.year, date.month, date.day).isBefore(manilaToday());
 
   /// `yyyy-MM-dd`, for `payment_date` / `payment_due` style columns.
   static String toDateString(DateTime date) => _isoDate.format(date);

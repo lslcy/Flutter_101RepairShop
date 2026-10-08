@@ -9,7 +9,9 @@ final transactionsRepositoryProvider = Provider(
   (ref) => TransactionsRepository(),
 );
 
-// Handles payment transactions for the signed-in customer
+// Reads payment transactions for the signed-in customer. Read-only on
+// purpose: RLS gives customers SELECT only on `transactions`. Payments are
+// recorded by staff in the web admin or through the PayMongo `payment_url`.
 class TransactionsRepository {
   TransactionsRepository({SupabaseClient? supabase})
     : _supabase = supabase ?? Supabase.instance.client,

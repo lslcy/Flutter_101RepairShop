@@ -98,5 +98,26 @@ class Appliance {
   }
 
   // Display name
-  String get displayName => '$brand $product'.trim();
+  String get displayName => [brand, product]
+      .map((part) => part?.trim() ?? '')
+      .where((part) => part.isNotEmpty)
+      .join(' ');
+
+  /// Name shown in pickers; falls back to the category or ID.
+  String get label {
+    if (displayName.isNotEmpty) return displayName;
+    final cat = category?.trim() ?? '';
+    return cat.isNotEmpty ? cat : 'Appliance #$id';
+  }
+
+  /// Text stored in `appointments.appliance_name` when booking with this
+  /// appliance, e.g. "Samsung Aircon (Model AR12, S/N 12345)". The table has
+  /// no appliance FK, so model and serial are included for staff.
+  String get bookingLabel {
+    final details = <String>[
+      if (modelNo?.trim().isNotEmpty ?? false) 'Model ${modelNo!.trim()}',
+      if (serialNo?.trim().isNotEmpty ?? false) 'S/N ${serialNo!.trim()}',
+    ];
+    return details.isEmpty ? label : '$label (${details.join(', ')})';
+  }
 }

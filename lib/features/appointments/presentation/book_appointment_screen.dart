@@ -5,10 +5,12 @@ import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/app_dates.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../profile/data/customer_repository.dart';
+import '../../shared/models/appliance.dart';
 import '../../shared/models/customer.dart';
 import '../data/appointments_repository.dart';
 
@@ -23,21 +25,31 @@ class BookAppointmentScreen extends ConsumerStatefulWidget {
 class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleFieldKey = GlobalKey();
+  final _applianceFieldKey = GlobalKey();
   final _dateFieldKey = GlobalKey<FormFieldState<DateTime>>();
   final _timeFieldKey = GlobalKey<FormFieldState<String>>();
   final _titleFocus = FocusNode();
+  final _applianceFocus = FocusNode();
   final _dateFocus = FocusNode();
   final _timeFocus = FocusNode();
   final _titleController = TextEditingController();
-  final _applianceController = TextEditingController();
   final _notesController = TextEditingController();
   DateTime? _selectedDate;
   String? _selectedTimeSlot;
   Customer? _customer;
+  List<Appliance> _appliances = [];
+  Appliance? _selectedAppliance;
   bool _isLoading = false;
   bool _isLoadingCustomer = true;
   bool _customerLoadFailed = false;
+  bool _isLoadingAppliances = true;
+  bool _appliancesLoadFailed = false;
   String? _bookingError;
+
+  bool get _hasAppliances =>
+      !_isLoadingAppliances && !_appliancesLoadFailed && _appliances.isNotEmpty;
+
+  bool get _canBook => _hasRequiredAddress && _hasAppliances;
 
   bool get _hasRequiredAddress =>
       !_isLoadingCustomer &&
@@ -48,14 +60,15 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   void initState() {
     super.initState();
     _loadCustomer();
+    _loadAppliances();
   }
 
   @override
   void dispose() {
     _titleController.dispose();
-    _applianceController.dispose();
     _notesController.dispose();
     _titleFocus.dispose();
+    _applianceFocus.dispose();
     _dateFocus.dispose();
     _timeFocus.dispose();
     super.dispose();
@@ -89,8 +102,45 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     if (mounted) await _loadCustomer();
   }
 
+  /// Loads "My Appliances". When [preferNewFrom] is given, an appliance whose
+  /// ID is not in it (i.e. one just added) is selected automatically.
+  Future<void> _loadAppliances({Set<int>? preferNewFrom}) async {
+    setState(() {
+      _isLoadingAppliances = true;
+      _appliancesLoadFailed = false;
+    });
+    try {
+      final appliances = await ref
+          .read(customerRepositoryProvider)
+          .getAppliances()
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      final added = preferNewFrom == null
+          ? null
+          : appliances.where((a) => !preferNewFrom.contains(a.id)).firstOrNull;
+      final previousId = _selectedAppliance?.id;
+      setState(() {
+        _appliances = appliances;
+        _selectedAppliance =
+            added ??
+            appliances.where((a) => a.id == previousId).firstOrNull ??
+            (appliances.length == 1 ? appliances.first : null);
+      });
+    } catch (_) {
+      if (mounted) setState(() => _appliancesLoadFailed = true);
+    } finally {
+      if (mounted) setState(() => _isLoadingAppliances = false);
+    }
+  }
+
+  Future<void> _addAppliance() async {
+    final before = _appliances.map((a) => a.id).toSet();
+    await context.push('/profile/appliances/add');
+    if (mounted) await _loadAppliances(preferNewFrom: before);
+  }
+
   Future<void> _pickDate(FormFieldState<DateTime> field) async {
-    final today = DateUtils.dateOnly(DateTime.now());
+    final today = AppDates.manilaToday();
     final initialDate = _selectedDate != null && !_selectedDate!.isBefore(today)
         ? _selectedDate!
         : today.add(const Duration(days: 1));
@@ -107,8 +157,8 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   }
 
   Future<void> _handleBook() async {
-    if (_isLoading || !_hasRequiredAddress) return;
-    if (!_formKey.currentState!.validate()) {
+    if (_isLoading || !_canBook) return;
+    if (!_formKey.currentState!.validate() || _selectedAppliance == null) {
       _revealFirstInvalidField();
       return;
     }
@@ -120,8 +170,9 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     try {
       await ref.read(appointmentsRepositoryProvider).bookAppointment({
         'title': _titleController.text.trim(),
-        'appliance_name': _applianceController.text.trim(),
-        'appointment_date': _selectedDate!.toIso8601String(),
+        // Filled from the chosen saved appliance (brand, product, model, S/N).
+        'appliance_name': _selectedAppliance!.bookingLabel,
+        'appointment_date': AppDates.toDateString(_selectedDate!),
         'time_slot': _selectedTimeSlot,
         'notes': _notesController.text.trim(),
         'status': 'Pending',
@@ -153,7 +204,10 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   void _revealFirstInvalidField() {
     final GlobalKey fieldKey;
     final FocusNode focusNode;
-    if (_titleController.text.trim().isEmpty) {
+    if (_selectedAppliance == null) {
+      fieldKey = _applianceFieldKey;
+      focusNode = _applianceFocus;
+    } else if (_titleController.text.trim().isEmpty) {
       fieldKey = _titleFieldKey;
       focusNode = _titleFocus;
     } else if (_dateFieldKey.currentState?.hasError ?? false) {
@@ -223,8 +277,11 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                     _section(
                       number: '1',
                       title: 'Repair details',
-                      description: 'A short description helps us prepare.',
+                      description:
+                          'Pick an appliance from My Appliances and tell us what is wrong.',
                       children: [
+                        _applianceField(),
+                        const SizedBox(height: AppSpacing.md),
                         AppTextField(
                           key: _titleFieldKey,
                           focusNode: _titleFocus,
@@ -238,15 +295,6 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                               value == null || value.trim().isEmpty
                               ? 'Describe what needs fixing.'
                               : null,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        AppTextField(
-                          label: 'Appliance / model (optional)',
-                          hint: 'e.g. Samsung split-type AC',
-                          controller: _applianceController,
-                          enabled: !_isLoading,
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.next,
                         ),
                       ],
                     ),
@@ -286,6 +334,12 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                           textInputAction: TextInputAction.newline,
                         ),
                         const SizedBox(height: AppSpacing.lg),
+                        _summaryRow(
+                          Icons.kitchen_outlined,
+                          'Appliance',
+                          _selectedAppliance?.bookingLabel ??
+                              'Choose an appliance above',
+                        ),
                         ValueListenableBuilder<TextEditingValue>(
                           valueListenable: _titleController,
                           builder: (context, value, child) => _summaryRow(
@@ -343,17 +397,21 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                       label: 'Book appointment',
                       loadingLabel: 'Booking appointment…',
                       icon: Icons.check_circle_outline,
-                      onPressed: _hasRequiredAddress ? _handleBook : null,
+                      onPressed: _canBook ? _handleBook : null,
                       isLoading: _isLoading,
                       width: double.infinity,
                     ),
-                    if (!_hasRequiredAddress) ...[
+                    if (!_canBook) ...[
                       const SizedBox(height: AppSpacing.sm),
                       Semantics(
                         liveRegion: true,
                         child: Text(
-                          _isLoadingCustomer
-                              ? 'Checking your saved address before booking.'
+                          _isLoadingCustomer || _isLoadingAppliances
+                              ? 'Loading your details before booking.'
+                              : _appliancesLoadFailed
+                              ? 'Reload your appliances above to continue.'
+                              : _appliances.isEmpty
+                              ? 'Add an appliance above to continue.'
                               : _customerLoadFailed
                               ? 'Reload your contact details above to continue.'
                               : 'Add your address above to continue.',
@@ -444,7 +502,7 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
       key: _dateFieldKey,
       validator: (value) {
         if (value == null) return 'Choose a preferred date.';
-        if (value.isBefore(DateUtils.dateOnly(DateTime.now()))) {
+        if (value.isBefore(AppDates.manilaToday())) {
           return 'Choose today or a later date.';
         }
         return null;
@@ -471,6 +529,176 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _applianceField() {
+    final theme = Theme.of(context);
+    if (_isLoadingAppliances) {
+      return Semantics(
+        liveRegion: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!MediaQuery.disableAnimationsOf(context))
+              const LinearProgressIndicator(
+                semanticsLabel: 'Loading your appliances',
+              ),
+            const SizedBox(height: AppSpacing.sm),
+            const Text('Loading your appliances…'),
+          ],
+        ),
+      );
+    }
+    if (_appliancesLoadFailed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('We couldn’t load your appliances.'),
+          TextButton.icon(
+            onPressed: _isLoading ? null : _loadAppliances,
+            icon: const Icon(Icons.refresh_outlined),
+            label: const Text('Try again'),
+          ),
+        ],
+      );
+    }
+    if (_appliances.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'You have no saved appliances yet. Add the appliance that needs repair to My Appliances first.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: _isLoading ? null : _addAppliance,
+            icon: const Icon(Icons.add_circle_outline),
+            label: const Text('Add an appliance'),
+          ),
+        ],
+      );
+    }
+
+    final selected = _selectedAppliance;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<int>(
+          key: _applianceFieldKey,
+          focusNode: _applianceFocus,
+          initialValue: selected?.id,
+          validator: (value) =>
+              value == null ? 'Choose the appliance that needs repair.' : null,
+          decoration: InputDecoration(
+            labelText: 'Appliance (from My Appliances)',
+            errorMaxLines: 3,
+            enabled: !_isLoading,
+            prefixIcon: const Icon(Icons.kitchen_outlined),
+          ),
+          hint: const Text('Select an appliance'),
+          isExpanded: true,
+          isDense: false,
+          itemHeight: null,
+          selectedItemBuilder: (context) => _appliances
+              .map(
+                (a) => Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(a.label, overflow: TextOverflow.ellipsis),
+                ),
+              )
+              .toList(),
+          items: _appliances.map((a) {
+            final subtitle = [
+              a.category?.trim() ?? '',
+              if (a.modelNo?.trim().isNotEmpty ?? false)
+                'Model ${a.modelNo!.trim()}',
+            ].where((part) => part.isNotEmpty).join(' · ');
+            return DropdownMenuItem(
+              value: a.id,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(a.label),
+                    if (subtitle.isNotEmpty)
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+          onChanged: _isLoading
+              ? null
+              : (id) => setState(
+                  () => _selectedAppliance = _appliances
+                      .where((a) => a.id == id)
+                      .firstOrNull,
+                ),
+        ),
+        if (selected != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          _applianceDetails(selected),
+        ],
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            onPressed: _isLoading ? null : _addAppliance,
+            icon: const Icon(Icons.add),
+            label: const Text('Not listed? Add an appliance'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Read-only details filled in from the chosen saved appliance.
+  Widget _applianceDetails(Appliance appliance) {
+    final theme = Theme.of(context);
+    String? clean(String? value) =>
+        (value?.trim().isNotEmpty ?? false) ? value!.trim() : null;
+    final brand = clean(appliance.brand);
+    final product = clean(appliance.product);
+    final category = clean(appliance.category);
+    final size = clean(appliance.applianceSize);
+    final model = clean(appliance.modelNo);
+    final serial = clean(appliance.serialNo);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (brand != null)
+            _summaryRow(Icons.sell_outlined, 'Brand', brand),
+          if (product != null)
+            _summaryRow(Icons.devices_other_outlined, 'Product', product),
+          if (category != null)
+            _summaryRow(Icons.category_outlined, 'Category', category),
+          if (size != null)
+            _summaryRow(Icons.straighten_outlined, 'Size', size),
+          if (model != null)
+            _summaryRow(Icons.tag_outlined, 'Model no.', model),
+          if (serial != null)
+            _summaryRow(Icons.qr_code_2_outlined, 'Serial no.', serial),
+          _summaryRow(
+            Icons.verified_outlined,
+            'Warranty',
+            appliance.warrantyLabel,
+          ),
+        ],
       ),
     );
   }

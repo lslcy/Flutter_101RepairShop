@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/app_dates.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -35,9 +35,7 @@ class AppNotification {
       message: json['message'],
       type: json['type'] ?? 'info',
       isRead: json['is_read'] ?? false,
-      createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'])
-          : null,
+      createdAt: AppDates.parseTimestamp(json['created_at']),
     );
   }
 }
@@ -257,8 +255,10 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 if (notification.createdAt != null) ...[
                   const SizedBox(height: AppSpacing.sm),
                   Text(
-                    DateFormat('MMM d, yyyy · h:mm a')
-                        .format(notification.createdAt!.toLocal()),
+                    AppDates.format(
+                      notification.createdAt!,
+                      'MMM d, yyyy · h:mm a',
+                    ),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
+import '../../../core/constants/statuses.dart';
+import '../../../core/utils/app_dates.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -247,7 +249,7 @@ class _AppliancesScreenState extends ConsumerState<AppliancesScreen> {
             runSpacing: AppSpacing.sm,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              StatusBadge(status: appliance.status ?? 'Active'),
+              StatusBadge(status: ApplianceStatus.normalize(appliance.status)),
               if (appliance.category?.trim().isNotEmpty ?? false)
                 Text(
                   appliance.category!,
@@ -312,7 +314,7 @@ class _AppliancesScreenState extends ConsumerState<AppliancesScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                StatusBadge(status: appliance.status ?? 'Active'),
+                StatusBadge(status: ApplianceStatus.normalize(appliance.status)),
                 const SizedBox(height: AppSpacing.lg),
                 if (appliance.category?.trim().isNotEmpty ?? false)
                   _infoRow(
@@ -342,15 +344,15 @@ class _AppliancesScreenState extends ConsumerState<AppliancesScreen> {
                   _infoRow(
                     Icons.calendar_today_outlined,
                     'Date added',
-                    DateFormat('MMM d, yyyy').format(appliance.dateIn!),
+                    AppDates.format(appliance.dateIn!, 'MMM d, yyyy'),
                   ),
                 if (appliance.warrantyEnd != null)
                   _infoRow(
                     Icons.verified_outlined,
                     'Warranty',
                     appliance.isUnderWarranty
-                        ? 'Until ${DateFormat('MMM d, yyyy').format(appliance.warrantyEnd!)}'
-                        : 'Expired ${DateFormat('MMM d, yyyy').format(appliance.warrantyEnd!)}',
+                        ? 'Until ${AppDates.format(appliance.warrantyEnd!, 'MMM d, yyyy')}'
+                        : 'Expired ${AppDates.format(appliance.warrantyEnd!, 'MMM d, yyyy')}',
                   ),
               ],
             ),

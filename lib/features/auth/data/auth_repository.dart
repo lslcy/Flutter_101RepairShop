@@ -57,16 +57,16 @@ class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
     }
   }
 
-  // Link the auth user to its `customers` row (claiming a counter-created
-  // row by email, or creating one). Screens retry this on load, so a failure
-  // here must never block signing in.
+  // Warm up the lookup of the `customers` row the sign-up trigger created.
+  // The app never inserts or links customer rows itself (RLS has no INSERT
+  // policy). Screens retry on load, so a failure must never block sign-in.
   Future<void> _linkCustomerProfile() async {
     try {
       await CustomerAccountService(
         supabase: _supabase,
       ).resolveCurrentCustomer().timeout(const Duration(seconds: 15));
     } catch (error) {
-      debugPrint('Customer profile linking deferred: $error');
+      debugPrint('Customer profile lookup deferred: $error');
     }
   }
 
@@ -90,6 +90,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
       final response = await _supabase.auth.signUp(
         email: email,
         password: password,
+        // `handle_new_user` builds the customer row from these keys (and
+        // links an existing counter-created customer with the same email).
+        // `address` is not read by the trigger; CustomerRepository copies it
+        // into the profile on first sign-in.
         data: {
           'first_name': firstName,
           'last_name': lastName,
@@ -97,8 +101,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
           'address': address.trim(),
         },
       );
-      // With email confirmation disabled the user already has a session, so
-      // link the customer row now; otherwise it is linked on first sign-in.
+      // With email confirmation disabled the user already has a session.
       if (response.session != null) await _linkCustomerProfile();
       // Ensure user is signed out so they are not automatically logged in
       await _supabase.auth.signOut();

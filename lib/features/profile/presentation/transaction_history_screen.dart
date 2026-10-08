@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/services/customer_account_service.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/app_dates.dart';
+import '../../../core/utils/load_errors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -57,15 +59,18 @@ class _TransactionHistoryScreenState
       );
       if (!mounted) return;
       if (transactions == null) {
-        _loadError = 'Your customer profile could not be found. Try again, or contact the shop if this continues.';
+        _loadError = CustomerAccountMissingException.text;
         return;
       }
       _transactions = transactions;
     } on TimeoutException {
       _loadError = 'Your transactions are taking longer than expected. Check your connection and try again.';
-    } catch (_) {
-      _loadError =
-          'We couldn’t load your transaction history. Please try again.';
+    } catch (error) {
+      _loadError = friendlyError(
+        error,
+        fallback:
+            'We couldn’t load your transaction history. Please try again.',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -225,9 +230,24 @@ class _TransactionHistoryScreenState
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     transaction.isPartial
-                        ? 'Paid ${_formatPeso(transaction.partialPaymentAmount)} · Balance ${_formatPeso(transaction.remainingBalance)}'
+                        ? 'Paid ${_formatPeso(transaction.partialPaymentAmount)} of ${_formatPeso(transaction.totalAmount)} · Balance ${_formatPeso(transaction.remainingBalance)}'
                         : 'Balance due ${_formatPeso(transaction.remainingBalance)}',
                     style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+                if (!transaction.isPaid && transaction.paymentDue != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    '${transaction.isOverdue ? 'Overdue · was due' : 'Due'} '
+                    '${AppDates.formatDate(transaction.paymentDue!, 'MMM d, y')}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: transaction.isOverdue
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
+                      fontWeight: transaction.isOverdue
+                          ? FontWeight.w700
+                          : null,
+                    ),
                   ),
                 ],
                 if (transaction.createdAt != null) ...[

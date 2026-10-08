@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
+import 'package:flutter_101repairshop/core/services/customer_account_service.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/welcome_screen.dart';
 import 'package:flutter_101repairshop/features/home/presentation/home_screen.dart';
 import 'package:flutter_101repairshop/features/profile/data/customer_repository.dart';
@@ -14,13 +15,18 @@ import 'package:flutter_101repairshop/features/shared/models/appointment.dart';
 import 'package:flutter_101repairshop/features/shared/models/service_report.dart';
 
 class _Customers extends CustomerRepository {
+  Object? error;
+
   @override
-  Future<Customer?> getCurrentCustomer() async => Customer(
-    id: 'customer',
-    firstName: 'Alex',
-    lastName: 'Reyes',
-    address: '123 Mabini Street, Barangay San Antonio, Davao City, 8000',
-  );
+  Future<Customer?> getCurrentCustomer() async {
+    if (error != null) throw error!;
+    return Customer(
+      id: 'customer',
+      firstName: 'Alex',
+      lastName: 'Reyes',
+      address: '123 Mabini Street, Barangay San Antonio, Davao City, 8000',
+    );
+  }
 }
 
 class _Repairs extends RepairsRepository {
@@ -36,8 +42,10 @@ class _Repairs extends RepairsRepository {
 }
 
 class _Appointments extends AppointmentsRepository {
+  bool fail = false;
   @override
   Future<List<Appointment>> getAppointments() async {
+    if (fail) throw Exception('appointments unavailable');
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     return [
@@ -90,6 +98,8 @@ void main() {
     WidgetTester tester,
     _Repairs repairs, {
     bool dark = false,
+    _Customers? customers,
+    _Appointments? appointments,
   }) async {
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1;
@@ -98,9 +108,13 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          customerRepositoryProvider.overrideWithValue(_Customers()),
+          customerRepositoryProvider.overrideWithValue(
+            customers ?? _Customers(),
+          ),
           repairsRepositoryProvider.overrideWithValue(repairs),
-          appointmentsRepositoryProvider.overrideWithValue(_Appointments()),
+          appointmentsRepositoryProvider.overrideWithValue(
+            appointments ?? _Appointments(),
+          ),
         ],
         child: MaterialApp(
           theme: dark ? AppTheme.dark : AppTheme.light,
@@ -138,21 +152,92 @@ void main() {
   );
 
   testWidgets(
-    'Dashboard errors provide a working retry instead of an empty state',
+    'A failed repairs request keeps appointments and address visible and retries',
     (tester) async {
       final repairs = _Repairs()..fail = true;
       await pumpDashboard(tester, repairs);
-      expect(find.text('We could not load your dashboard'), findsOneWidget);
+      expect(find.text('We could not load your repairs'), findsOneWidget);
+      expect(find.text('We could not load your dashboard'), findsNothing);
+      expect(find.text('No active repairs'), findsNothing);
+      expect(find.text('Upcoming appointments (2)'), findsOneWidget);
+      expect(find.text('Next visit'), findsOneWidget);
+      expect(
+        find.text('123 Mabini Street, Barangay San Antonio, Davao City, 8000'),
+        findsOneWidget,
+      );
+
       repairs.fail = false;
       await tester.ensureVisible(find.text('Try again'));
       await tester.tap(find.text('Try again'));
       await tester.pumpAndSettle();
-      expect(find.text('We could not load your dashboard'), findsNothing);
+      expect(find.text('We could not load your repairs'), findsNothing);
       expect(find.text('Active repairs (1)'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
 
+  testWidgets(
+    'A missing customer account explains setup rather than blaming connection',
+    (tester) async {
+      final customers = _Customers()..error = CustomerAccountMissingException();
+      await pumpDashboard(tester, _Repairs(), customers: customers);
+      expect(find.text('We could not load your profile'), findsOneWidget);
+      expect(find.text(CustomerAccountMissingException.text), findsOneWidget);
+      expect(find.text('Check your connection and try again.'), findsNothing);
+      expect(find.textContaining('You appear to be offline'), findsNothing);
+      expect(find.text('Add your address'), findsNothing);
+      expect(find.text('Upcoming appointments (2)'), findsOneWidget);
+      expect(find.text('Active repairs (1)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A failed appointments request does not claim there are no appointments',
+    (tester) async {
+      final appointments = _Appointments()..fail = true;
+      await pumpDashboard(tester, _Repairs(), appointments: appointments);
+      expect(find.text('We could not load your appointments'), findsOneWidget);
+      expect(find.text('No appointments coming up'), findsNothing);
+      expect(find.text('Please try again in a moment.'), findsOneWidget);
+      expect(find.text('Active repairs (1)'), findsOneWidget);
+
+      appointments.fail = false;
+      await tester.ensureVisible(find.text('Try again'));
+      await tester.tap(find.text('Try again'));
+      await tester.pumpAndSettle();
+      expect(find.text('We could not load your appointments'), findsNothing);
+      expect(find.text('Upcoming appointments (2)'), findsOneWidget);
+      expect(find.text('Next visit'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A failed refresh retains previous appointments and other successful sections',
+    (tester) async {
+      final appointments = _Appointments();
+      await pumpDashboard(tester, _Repairs(), appointments: appointments);
+      expect(find.text('Next visit'), findsOneWidget);
+      appointments.fail = true;
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(0, 450),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('We could not load your appointments'), findsOneWidget);
+      expect(find.text('Next visit'), findsOneWidget);
+      expect(find.text('Later visit'), findsOneWidget);
+      expect(find.text('No appointments coming up'), findsNothing);
+      expect(find.text('Active repairs (1)'), findsOneWidget);
+      expect(
+        find.text('123 Mabini Street, Barangay San Antonio, Davao City, 8000'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('Welcome remains scrollable on a small screen with large text', (
     tester,
   ) async {

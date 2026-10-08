@@ -8,6 +8,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/utils/load_errors.dart';
 import '../data/customer_repository.dart';
 
 class AddApplianceScreen extends ConsumerStatefulWidget {
@@ -30,7 +31,7 @@ class _AddApplianceScreenState extends ConsumerState<AddApplianceScreen> {
   String? _selectedCategory;
   String? _selectedSize;
   bool _isSaving = false;
-  bool _saveFailed = false;
+  String? _saveError;
 
   @override
   void dispose() {
@@ -69,7 +70,7 @@ class _AddApplianceScreenState extends ConsumerState<AddApplianceScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _isSaving = true;
-      _saveFailed = false;
+      _saveError = null;
     });
     try {
       await ref.read(customerRepositoryProvider).addAppliance({
@@ -79,8 +80,6 @@ class _AddApplianceScreenState extends ConsumerState<AddApplianceScreen> {
         'serial_no': _serialController.text.trim(),
         'category': _selectedCategory,
         'appliance_size': _selectedSize,
-        'date_in': DateTime.now().toIso8601String(),
-        'status': 'Active',
       });
       if (!mounted) return;
       // Re-enable popping before returning from a successful save.
@@ -88,8 +87,20 @@ class _AddApplianceScreenState extends ConsumerState<AddApplianceScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Appliance added.')));
       context.pop();
-    } catch (_) {
-      if (mounted) setState(() => _saveFailed = true);
+    } catch (error) {
+      if (!mounted) return;
+      final message = friendlyError(
+        error,
+        fallback:
+            'Could not add your appliance. Your details are still here. Please try again.',
+      );
+      setState(() => _saveError = message);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -209,13 +220,13 @@ class _AddApplianceScreenState extends ConsumerState<AddApplianceScreen> {
                         onFieldSubmitted: (_) => _handleSubmit(),
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      if (_saveFailed) ...[
+                      if (_saveError != null) ...[
                         Semantics(
                           liveRegion: true,
                           child: AppCard(
                             color: scheme.errorContainer,
                             child: Text(
-                              'Could not add your appliance. Your details are still here. Check your connection and try again.',
+                              _saveError!,
                               style: AppTextStyles.body.copyWith(
                                 color: scheme.onErrorContainer,
                               ),

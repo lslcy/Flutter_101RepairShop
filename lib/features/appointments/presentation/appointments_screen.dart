@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
+import '../../../core/utils/app_dates.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -228,8 +229,10 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  DateFormat('EEE, MMM d, yyyy')
-                      .format(appointment.appointmentDate),
+                  AppDates.format(
+                    appointment.appointmentDate,
+                    'EEE, MMM d, yyyy',
+                  ),
                   style: AppTextStyles.body.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -260,7 +263,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          StatusBadge(status: appointment.status ?? 'Pending'),
+          StatusBadge(status: appointment.displayStatus),
         ],
       ),
     );

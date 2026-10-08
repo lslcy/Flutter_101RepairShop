@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
+import '../../../core/constants/statuses.dart';
+import '../../../core/utils/app_dates.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -19,7 +21,13 @@ class RepairsScreen extends ConsumerStatefulWidget {
 }
 
 class _RepairsScreenState extends ConsumerState<RepairsScreen> {
-  static const _statusFilters = ['All', 'Pending', 'In Progress', 'Completed'];
+  static const _statusFilters = [
+    'All',
+    RepairStatus.pending,
+    RepairStatus.inProgress,
+    RepairStatus.completed,
+    RepairStatus.cancelled,
+  ];
   final _searchController = TextEditingController();
   List<ServiceReport> _allRepairs = [];
   bool _isLoading = true;
@@ -31,10 +39,11 @@ class _RepairsScreenState extends ConsumerState<RepairsScreen> {
   List<ServiceReport> get _filteredRepairs {
     final query = _searchController.text.trim().toLowerCase();
     return _allRepairs.where((report) {
-      final status = report.status ?? 'Pending';
-      if (_selectedFilter != 'All' &&
-          status.toLowerCase() != _selectedFilter.toLowerCase()) {
-        return false;
+      if (_selectedFilter != 'All') {
+        final matches = _selectedFilter == RepairStatus.inProgress
+            ? RepairStatus.isInProgress(report.status)
+            : RepairStatus.normalize(report.status) == _selectedFilter;
+        if (!matches) return false;
       }
       return query.isEmpty ||
           'sr-${report.id}'.contains(query) ||
@@ -372,11 +381,11 @@ class _RepairsScreenState extends ConsumerState<RepairsScreen> {
             runSpacing: AppSpacing.sm,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              StatusBadge(status: report.status ?? 'Pending'),
+              StatusBadge(status: RepairStatus.normalize(report.status)),
               Text(
                 report.dateIn == null
                     ? 'Date not recorded'
-                    : 'Received ${DateFormat('MMM d, yyyy').format(report.dateIn!)}',
+                    : 'Received ${AppDates.format(report.dateIn!, 'MMM d, yyyy')}',
                 style: AppTextStyles.bodySmall.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),

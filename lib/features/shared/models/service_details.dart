@@ -53,8 +53,9 @@ class ServiceDetails {
       miscellaneousCost: _toDouble(json['miscellaneous_cost']),
       totalAmount: _toDouble(json['total_amount']),
       technicians: _splitNames(json['technician']),
-      dateRepaired: AppDates.parseTimestamp(json['date_repaired']),
-      dateDelivered: AppDates.parseTimestamp(json['date_delivered']),
+      // `timestamp without time zone`, stored as UTC by Laravel.
+      dateRepaired: AppDates.parseUtcTimestamp(json['date_repaired']),
+      dateDelivered: AppDates.parseUtcTimestamp(json['date_delivered']),
     );
   }
 
@@ -120,7 +121,7 @@ class ServiceProgressComment {
       progressKey: _text(json['progress_key']),
       commentText: _text(json['comment_text']) ?? '',
       createdByName: _text(json['created_by_name']),
-      createdAt: AppDates.parseTimestamp(json['created_at']),
+      createdAt: AppDates.parseUtcTimestamp(json['created_at']),
     );
   }
 
@@ -130,4 +131,54 @@ class ServiceProgressComment {
     if (key.isEmpty) return null;
     return key[0].toUpperCase() + key.substring(1).toLowerCase();
   }
+}
+
+/// A part recorded against a report in `part_service_report` (pivot keyed
+/// by `service_report_id`), with the name joined from `parts`.
+class PartUsed {
+  final int? id;
+  final int? partId;
+  final String name;
+  final int quantity;
+
+  /// Unit price at the time of repair.
+  final double? price;
+  final bool isNotWorking;
+  final DateTime? createdAt;
+
+  PartUsed({
+    this.id,
+    this.partId,
+    required this.name,
+    this.quantity = 1,
+    this.price,
+    this.isNotWorking = false,
+    this.createdAt,
+  });
+
+  factory PartUsed.fromJson(Map<String, dynamic> json, {String? fallbackName}) {
+    final part = json['parts'];
+    final joinedName = part is Map ? _text(part['name']) : null;
+    final partId = (json['part_id'] as num?)?.toInt();
+    final isNotWorking = json['is_not_working'];
+    return PartUsed(
+      id: (json['id'] as num?)?.toInt(),
+      partId: partId,
+      name:
+          joinedName ??
+          fallbackName ??
+          (partId == null ? 'Part' : 'Part #$partId'),
+      quantity: (json['quantity'] as num?)?.toInt() ?? 1,
+      price: _toDouble(json['price']),
+      isNotWorking:
+          isNotWorking == true ||
+          isNotWorking == 1 ||
+          isNotWorking?.toString().toLowerCase() == 'true',
+      // `timestamp without time zone`, stored as UTC by Laravel.
+      createdAt: AppDates.parseUtcTimestamp(json['created_at']),
+    );
+  }
+
+  /// `price × quantity`, or `null` when no price was recorded.
+  double? get lineTotal => price == null ? null : price! * quantity;
 }

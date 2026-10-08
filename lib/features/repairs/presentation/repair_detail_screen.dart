@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/statuses.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/app_dates.dart';
+import '../../../core/utils/load_errors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -61,6 +62,7 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
           _extras = RepairExtras(
             details: _extras.details,
             detailsFailed: _extras.details == null,
+            parts: _extras.parts,
             comments: _extras.comments,
             transactions: _extras.transactions,
           );
@@ -68,8 +70,11 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
       }
     } on TimeoutException {
       _loadError = 'Your repair report is taking longer than expected. Check your connection and try again.';
-    } catch (_) {
-      _loadError = 'We couldn’t load this repair report. Please try again.';
+    } catch (error) {
+      _loadError = friendlyError(
+        error,
+        fallback: 'We couldn’t load this repair report. Please try again.',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -140,8 +145,10 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
         const SizedBox(height: AppSpacing.md),
         _buildAssessment(details),
         const SizedBox(height: AppSpacing.md),
-        if (details != null) ...[
-          _buildCosts(details),
+        _buildCosts(details),
+        const SizedBox(height: AppSpacing.md),
+        if (_extras.parts.isNotEmpty) ...[
+          _buildPartsUsed(),
           const SizedBox(height: AppSpacing.md),
         ],
         if (_extras.transactions.isNotEmpty) ...[
@@ -152,19 +159,16 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
           _buildProgressComments(),
           const SizedBox(height: AppSpacing.md),
         ],
-        if (_report!.findings?.trim().isNotEmpty ?? false)
-          _buildInfoSection(
-            'Findings',
-            _report!.findings!,
-            Icons.search_outlined,
-          ),
         if (_report!.remarks?.trim().isNotEmpty ?? false)
           _buildInfoSection(
             'Remarks',
             _report!.remarks!,
             Icons.comment_outlined,
           ),
-        if (_report!.usedParts?.trim().isNotEmpty ?? false)
+        // Legacy free-text parts list, shown only when no structured parts
+        // rows are available.
+        if (_extras.parts.isEmpty &&
+            (_report!.usedParts?.trim().isNotEmpty ?? false))
           _buildInfoSection(
             'Parts used',
             _report!.usedParts!,
@@ -417,30 +421,15 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
     final muted = theme.textTheme.bodyMedium?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
-    if (details == null) {
-      return AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _sectionHeader('Repair assessment', Icons.fact_check_outlined),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              _extras.detailsFailed
-                  ? 'Cost details are unavailable'
-                  : 'Not yet assessed',
-              style: theme.textTheme.titleSmall,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              _extras.detailsFailed
-                  ? 'We couldn’t load the technician’s assessment right now. Pull down to refresh.'
-                  : 'The technician will add the complaint, services and repair cost after checking your appliance.',
-              style: muted,
-            ),
-          ],
-        ),
-      );
-    }
+    final findings = _report!.findings?.trim();
+    final hasFindings = findings != null && findings.isNotEmpty;
+    final complaint = details?.complaint?.trim();
+    final hasComplaint = complaint != null && complaint.isNotEmpty;
+    // Older mobile reports only have `findings`; the web admin records the
+    // customer's complaint in `service_details`.
+    final problem = hasComplaint ? complaint : (hasFindings ? findings : null);
+    final showTechnicianFindings =
+        hasComplaint && hasFindings && findings != complaint;
 
     return AppCard(
       child: Column(
@@ -448,51 +437,67 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
         children: [
           _sectionHeader('Repair assessment', Icons.fact_check_outlined),
           const SizedBox(height: AppSpacing.lg),
-          if (details.complaint != null) ...[
-            _buildDetailItem(
-              icon: Icons.report_problem_outlined,
-              label: 'Complaint',
-              value: details.complaint!,
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
           _buildDetailItem(
-            icon: Icons.handyman_outlined,
-            label: 'Services',
-            value: details.serviceTypes.isEmpty
-                ? 'Not specified yet'
-                : details.serviceTypes.join(', '),
+            icon: Icons.report_problem_outlined,
+            label: 'Problem',
+            value: problem ?? 'Not recorded yet',
           ),
-          const SizedBox(height: AppSpacing.md),
-          _buildDetailItem(
-            icon: Icons.engineering_outlined,
-            label: details.technicians.length > 1 ? 'Technicians' : 'Technician',
-            value: details.technicians.isEmpty
-                ? 'Not assigned yet'
-                : details.technicians.join(', '),
-          ),
-          if (details.dateRepaired != null) ...[
+          if (showTechnicianFindings) ...[
             const SizedBox(height: AppSpacing.md),
             _buildDetailItem(
-              icon: Icons.build_circle_outlined,
-              label: 'Repaired on',
-              value: AppDates.format(details.dateRepaired!, 'MMM d, y'),
+              icon: Icons.search_outlined,
+              label: 'Technician findings',
+              value: findings,
             ),
           ],
-          if (details.dateDelivered != null) ...[
+          if (details == null) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'The technician will add the services and repair cost after checking your appliance.',
+              style: muted,
+            ),
+          ] else ...[
             const SizedBox(height: AppSpacing.md),
             _buildDetailItem(
-              icon: Icons.local_shipping_outlined,
-              label: 'Delivered on',
-              value: AppDates.format(details.dateDelivered!, 'MMM d, y'),
+              icon: Icons.handyman_outlined,
+              label: 'Services',
+              value: details.serviceTypes.isEmpty
+                  ? 'Not specified yet'
+                  : details.serviceTypes.join(', '),
             ),
+            const SizedBox(height: AppSpacing.md),
+            _buildDetailItem(
+              icon: Icons.engineering_outlined,
+              label: details.technicians.length > 1
+                  ? 'Technicians'
+                  : 'Technician',
+              value: details.technicians.isEmpty
+                  ? 'Not assigned yet'
+                  : details.technicians.join(', '),
+            ),
+            if (details.dateRepaired != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              _buildDetailItem(
+                icon: Icons.build_circle_outlined,
+                label: 'Repaired on',
+                value: AppDates.format(details.dateRepaired!, 'MMM d, y'),
+              ),
+            ],
+            if (details.dateDelivered != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              _buildDetailItem(
+                icon: Icons.local_shipping_outlined,
+                label: 'Delivered on',
+                value: AppDates.format(details.dateDelivered!, 'MMM d, y'),
+              ),
+            ],
           ],
         ],
       ),
     );
   }
 
-  Widget _buildCosts(ServiceDetails details) {
+  Widget _buildCosts(ServiceDetails? details) {
     final theme = Theme.of(context);
     Widget line(String label, double? amount, {bool total = false}) {
       final style = total
@@ -511,6 +516,21 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
       );
     }
 
+    // No `service_details` row yet (or not readable): never show ₱0.
+    if (details == null) {
+      return AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _sectionHeader('Repair cost', Icons.payments_outlined),
+            const SizedBox(height: AppSpacing.md),
+            Text('Awaiting assessment', style: theme.textTheme.titleSmall),
+          ],
+        ),
+      );
+    }
+
+    final total = details.computedTotal;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -523,7 +543,67 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
           line('Pull-out / delivery', details.pulloutDelivery),
           const Divider(),
           const SizedBox(height: AppSpacing.sm),
-          line('Total', details.computedTotal, total: true),
+          if (total == null)
+            Text('Awaiting assessment', style: theme.textTheme.titleSmall)
+          else
+            line('Total', total, total: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPartsUsed() {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final parts = _extras.parts;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sectionHeader('Parts used', Icons.settings_outlined),
+          const SizedBox(height: AppSpacing.lg),
+          for (var i = 0; i < parts.length; i++)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: i == parts.length - 1 ? 0 : AppSpacing.md,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(parts[i].name, style: theme.textTheme.titleSmall),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          parts[i].price == null
+                              ? 'Qty ${parts[i].quantity}'
+                              : 'Qty ${parts[i].quantity} × ${formatPeso(parts[i].price)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (parts[i].isNotWorking) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            'Marked as not working',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.error,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    formatPeso(parts[i].lineTotal, fallback: '—'),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

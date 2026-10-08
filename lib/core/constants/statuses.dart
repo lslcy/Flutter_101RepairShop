@@ -110,6 +110,10 @@ class AppointmentStatus {
 
   static const values = [pending, confirmed, completed, cancelled];
 
+  /// Display-only label for a `Pending` booking whose date has passed
+  /// without staff confirming it. Never written to the database.
+  static const pastAwaitingStaff = 'Past — awaiting staff';
+
   static String normalize(String? raw) {
     final value = raw?.trim() ?? '';
     switch (value.toLowerCase()) {
@@ -140,5 +144,29 @@ class AppointmentStatus {
     return status == completed ||
         status == cancelled ||
         const {'released', 'closed'}.contains(status.toLowerCase());
+  }
+}
+
+/// `appliances.status`, written by staff in the Laravel admin.
+class ApplianceStatus {
+  ApplianceStatus._();
+
+  static const active = 'Active';
+  static const forRepair = 'For Repair';
+  static const underRepair = 'Under Repair';
+  static const repaired = 'Repaired';
+  static const inactive = 'Inactive';
+
+  static const values = [active, forRepair, underRepair, repaired, inactive];
+
+  /// Canonical label. A missing status is shown as [active].
+  static String normalize(String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty) return active;
+    final key = value.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ');
+    for (final known in values) {
+      if (known.toLowerCase() == key) return known;
+    }
+    return value;
   }
 }

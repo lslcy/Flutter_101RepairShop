@@ -40,6 +40,7 @@ class StatusBadge extends StatelessWidget {
       case 'completed':
       case 'paid':
       case 'active':
+      case 'repaired':
         return (AppColors.successBg, const Color(0xFF065F46));
       case 'in progress':
       case 'ongoing':
@@ -47,6 +48,7 @@ class StatusBadge extends StatelessWidget {
         return (AppColors.infoBg, const Color(0xFF1E40AF));
       case 'waiting for parts':
       case 'partial':
+      case 'for repair':
         return (const Color(0xFFFFEDD5), const Color(0xFF9A3412));
       case 'under repair':
         return (const Color(0xFFEDE9FE), const Color(0xFF5B21B6));
@@ -58,6 +60,10 @@ class StatusBadge extends StatelessWidget {
       case 'overdue':
       case 'expired':
         return (AppColors.errorBg, const Color(0xFF991B1B));
+      // Neutral: inactive appliances, past bookings staff never confirmed,
+      // and any status the app does not know yet.
+      case 'inactive':
+      case 'past — awaiting staff':
       default:
         return (AppColors.surfaceVariant, AppColors.textSecondary);
     }

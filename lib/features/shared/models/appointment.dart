@@ -60,8 +60,21 @@ class Appointment {
     };
   }
 
-  /// `Pending`, `Confirmed`, `Completed` or `Cancelled`.
+  /// `Pending`, `Confirmed`, `Completed` or `Cancelled` as stored by staff.
   String get statusLabel => AppointmentStatus.normalize(status);
 
-  bool get canCancel => AppointmentStatus.canCancel(status);
+  /// Still `Pending` although the booked day (Manila) has already passed.
+  bool get isPastAwaitingStaff =>
+      statusLabel == AppointmentStatus.pending &&
+      AppDates.manilaDateOf(appointmentDate).isBefore(AppDates.manilaToday());
+
+  /// Label for badges: [statusLabel], or "Past — awaiting staff".
+  String get displayStatus => isPastAwaitingStaff
+      ? AppointmentStatus.pastAwaitingStaff
+      : statusLabel;
+
+  bool get isConfirmed => statusLabel == AppointmentStatus.confirmed;
+
+  bool get canCancel =>
+      AppointmentStatus.canCancel(status) && !isPastAwaitingStaff;
 }

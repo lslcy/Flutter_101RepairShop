@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/load_errors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/app_card.dart';
@@ -45,11 +46,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ? 'Your profile is unavailable. Please try again.'
             : null;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Profile load failed: ${loadFailureDiagnostic(error)}');
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = 'We couldn’t load your profile. Check your connection and try again.';
+        _error = friendlyError(
+          error,
+          fallback: 'We could not load your profile. Please try again.',
+        );
       });
     }
   }
@@ -85,7 +90,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     try {
       await ref.read(authStateProvider.notifier).signOut();
       if (mounted) context.go('/welcome');
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Couldn’t sign out. Please try again.')),
@@ -339,7 +344,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
     child: Text(label, style: AppTextStyles.heading3),
   );
-
 
   Widget _menuItem(
     IconData icon,

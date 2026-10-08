@@ -55,7 +55,10 @@ class PaymentSummary extends StatelessWidget {
           PaymentRow(
             icon: Icons.price_check_outlined,
             label: 'Amount paid',
-            value: formatPeso(t.partialPaymentAmount),
+            value: t.totalAmount == null
+                ? 'Paid ${formatPeso(t.partialPaymentAmount, fallback: '₱0.00')}'
+                : 'Paid ${formatPeso(t.partialPaymentAmount, fallback: '₱0.00')} '
+                      'of ${formatPeso(t.totalAmount)}',
           ),
           PaymentRow(
             icon: Icons.account_balance_wallet_outlined,
@@ -70,12 +73,12 @@ class PaymentSummary extends StatelessWidget {
             value: formatPeso(t.remainingBalance),
             emphasize: true,
           ),
-        if (t.paymentMethod != null)
-          PaymentRow(
-            icon: Icons.credit_card_outlined,
-            label: 'Payment method',
-            value: t.paymentMethod!,
-          ),
+        // Free text written by staff (Cash, GCash, Bank Transfer, …).
+        PaymentRow(
+          icon: Icons.credit_card_outlined,
+          label: 'Payment method',
+          value: t.paymentMethod ?? '—',
+        ),
         if (t.referenceNo != null)
           PaymentRow(
             icon: Icons.tag_outlined,
@@ -90,9 +93,12 @@ class PaymentSummary extends StatelessWidget {
           ),
         if (!t.isPaid && t.paymentDue != null)
           PaymentRow(
-            icon: Icons.event_outlined,
-            label: 'Payment due',
+            icon: t.isOverdue
+                ? Icons.warning_amber_outlined
+                : Icons.event_outlined,
+            label: t.isOverdue ? 'Payment due · Overdue' : 'Payment due',
             value: AppDates.formatDate(t.paymentDue!, 'MMM d, y'),
+            highlight: t.isOverdue,
           ),
         if (t.receivedBy != null)
           PaymentRow(
@@ -118,6 +124,7 @@ class PaymentRow extends StatelessWidget {
     required this.label,
     required this.value,
     this.emphasize = false,
+    this.highlight = false,
   });
 
   final IconData icon;
@@ -125,15 +132,25 @@ class PaymentRow extends StatelessWidget {
   final String value;
   final bool emphasize;
 
+  /// Draws attention to the row (e.g. an overdue due date).
+  final bool highlight;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accent = highlight ? theme.colorScheme.error : null;
+    final valueStyle = emphasize || highlight
+        ? theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: accent,
+          )
+        : theme.textTheme.bodyLarge;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: theme.colorScheme.primary),
+          Icon(icon, size: 20, color: accent ?? theme.colorScheme.primary),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -142,18 +159,11 @@ class PaymentRow extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: accent ?? theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                Text(
-                  value,
-                  style: emphasize
-                      ? theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        )
-                      : theme.textTheme.bodyLarge,
-                ),
+                Text(value, style: valueStyle),
               ],
             ),
           ),

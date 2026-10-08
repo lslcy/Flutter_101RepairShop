@@ -22,15 +22,14 @@ class CustomerRepository {
   final SupabaseClient _supabase;
   final CustomerAccountService _accounts;
 
-  // Get current customer profile, linking a counter-created customer row or
-  // creating one on first sign-in (see CustomerAccountService).
+  // Get the current customer profile (created by the sign-up DB trigger).
+  // Returns `null` only when signed out; throws
+  // [CustomerAccountMissingException] when no active row exists yet.
   Future<Customer?> getCurrentCustomer() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return null;
 
-    var data = await _accounts.resolveCurrentCustomer();
-
-    if (data == null) return null;
+    Map<String, dynamic>? data = await _accounts.requireCurrentCustomer();
 
     // Email confirmation may prevent a customer write during signup, and older
     // account-creation triggers may not copy the address from auth metadata.
@@ -53,7 +52,7 @@ class CustomerRepository {
       data = saved.isEmpty
           ? await _accounts.findActiveCustomer(user.id)
           : saved.first;
-      if (data == null) return null;
+      if (data == null) throw CustomerAccountMissingException();
       if (data['address'] == null) {
         throw StateError('Your address could not be saved. Please try again.');
       }
@@ -81,34 +80,56 @@ class CustomerRepository {
 
   // Get customer appliances (archived appliances are hidden)
   Future<List<Appliance>> getAppliances() async {
-    final customer = await getCurrentCustomer();
-    if (customer == null) return [];
+    final customerId = await _accounts.requireCustomerId();
 
     final data = await _supabase
         .from('appliances')
         .select()
-        .eq('customer_id', customer.id)
+        .eq('customer_id', customerId)
         .isFilter('deleted_at', null)
         .order('created_at', ascending: false);
 
     return data.map(Appliance.fromJson).toList();
   }
 
+  /// Columns a customer may set when registering an appliance. Everything
+  /// else (`date_in`, `warranty_end`, later statuses) is managed by staff.
+  static const _applianceColumns = {
+    'brand',
+    'product',
+    'model_no',
+    'serial_no',
+    'category',
+    'appliance_size',
+  };
+
   // Add a new appliance
   Future<void> addAppliance(Map<String, dynamic> applianceData) async {
-    final customer = await getCurrentCustomer();
-    if (customer == null) {
-      throw StateError('Your profile is unavailable. Please sign in again.');
-    }
+    final customerId = await _accounts.requireCustomerId();
 
-    final status = applianceData['status']?.toString().trim() ?? '';
-    await _supabase.from('appliances').insert({
-      ...applianceData,
-      'customer_id': customer.id,
-      'status': status.isEmpty ? Appliance.defaultStatus : status,
-      'appliance_size': Appliance.normalizeSize(
-        applianceData['appliance_size'] as String?,
-      ),
-    });
+    final row = <String, dynamic>{
+      for (final entry in applianceData.entries)
+        if (_applianceColumns.contains(entry.key))
+          entry.key: entry.value is String && entry.value.trim().isEmpty
+              ? null
+              : entry.value,
+    };
+
+    // RLS returns zero rows instead of an error when it blocks a write, so an
+    // empty result is treated as a failure rather than a fake success.
+    final inserted = await _supabase
+        .from('appliances')
+        .insert({
+          ...row,
+          'customer_id': customerId,
+          'status': Appliance.defaultStatus,
+          'appliance_size': Appliance.normalizeSize(
+            row['appliance_size'] as String?,
+          ),
+        })
+        .select('id');
+    if (inserted.isEmpty) {
+      throw StateError('Your appliance could not be saved. Please try again.');
+    }
   }
 }

@@ -13,10 +13,13 @@ final repairsRepositoryProvider = Provider((ref) => RepairsRepository());
 
 /// Supplementary data shown on the repair details screen. Each part loads
 /// independently so one unavailable table never hides the report itself.
+/// Customer read access to these staff-side tables is granted by RLS on the
+/// database side; an empty or denied result simply hides that section.
 class RepairExtras {
   const RepairExtras({
     this.details,
     this.detailsFailed = false,
+    this.parts = const [],
     this.comments = const [],
     this.transactions = const [],
   });
@@ -26,6 +29,9 @@ class RepairExtras {
 
   /// True when the cost details could not be loaded (as opposed to missing).
   final bool detailsFailed;
+
+  /// Parts recorded in `part_service_report`.
+  final List<PartUsed> parts;
   final List<ServiceProgressComment> comments;
   final List<models.Transaction> transactions;
 }
@@ -45,10 +51,11 @@ class RepairsRepository {
   final CustomerAccountService _accounts;
   final TransactionsRepository _transactions;
 
-  // Get all non-archived repairs for current customer
+  // Get all non-archived repairs for current customer. `service_reports` is
+  // SELECT-only for customers: bookings go through `appointments`, and staff
+  // turn a confirmed appointment into a report from the admin site.
   Future<List<ServiceReport>> getRepairs() async {
-    final customerId = await _accounts.currentCustomerId();
-    if (customerId == null) return [];
+    final customerId = await _accounts.requireCustomerId();
 
     final data = await _supabase
         .from('service_reports')
@@ -62,8 +69,7 @@ class RepairsRepository {
 
   // Get single non-archived repair by ID for the current customer
   Future<ServiceReport?> getRepairById(int id) async {
-    final customerId = await _accounts.currentCustomerId();
-    if (customerId == null) return null;
+    final customerId = await _accounts.requireCustomerId();
 
     final data = await _supabase
         .from('service_reports')
@@ -100,11 +106,70 @@ class RepairsRepository {
     return rows.map(ServiceProgressComment.fromJson).toList();
   }
 
+  /// Parts used on the report. The pivot is keyed by `service_report_id`.
+  /// Part names are embedded from `parts`; if the embed is unavailable the
+  /// names are fetched separately, and finally fall back to `Part #id`.
+  Future<List<PartUsed>> getPartsUsed(int reportId) async {
+    List<Map<String, dynamic>> rows;
+    try {
+      rows = await _supabase
+          .from('part_service_report')
+          .select(
+            'id, part_id, quantity, price, is_not_working, created_at, '
+            'parts(name)',
+          )
+          .eq('service_report_id', reportId)
+          .order('id', ascending: true);
+      return rows.map(PartUsed.fromJson).toList();
+    } on PostgrestException catch (error) {
+      debugPrint('Parts embed unavailable, loading separately: $error');
+    }
+
+    rows = await _supabase
+        .from('part_service_report')
+        .select()
+        .eq('service_report_id', reportId)
+        .order('id', ascending: true);
+    if (rows.isEmpty) return const [];
+
+    final names = <int, String>{};
+    final partIds = rows
+        .map((row) => (row['part_id'] as num?)?.toInt())
+        .whereType<int>()
+        .toSet()
+        .toList();
+    if (partIds.isNotEmpty) {
+      try {
+        final parts = await _supabase
+            .from('parts')
+            .select('id, name')
+            .inFilter('id', partIds);
+        for (final part in parts) {
+          final id = (part['id'] as num?)?.toInt();
+          final name = part['name']?.toString().trim() ?? '';
+          if (id != null && name.isNotEmpty) names[id] = name;
+        }
+      } catch (error) {
+        debugPrint('Part names unavailable: $error');
+      }
+    }
+    return rows
+        .map(
+          (row) => PartUsed.fromJson(
+            row,
+            fallbackName: names[(row['part_id'] as num?)?.toInt()],
+          ),
+        )
+        .toList();
+  }
+
   /// Loads everything shown beside the report. Failures are contained so the
-  /// report still renders: missing details show as "Not yet assessed".
+  /// report still renders: missing details show as "Awaiting assessment" and
+  /// empty or denied lists hide their section.
   Future<RepairExtras> getRepairExtras(int reportId) async {
     ServiceDetails? details;
     var detailsFailed = false;
+    var parts = <PartUsed>[];
     var comments = <ServiceProgressComment>[];
     var transactions = <models.Transaction>[];
 
@@ -115,6 +180,12 @@ class RepairsRepository {
             detailsFailed = true;
             debugPrint('Service details unavailable: $error');
             return null;
+          }),
+      getPartsUsed(reportId)
+          .then((value) => parts = value)
+          .catchError((Object error) {
+            debugPrint('Parts used unavailable: $error');
+            return <PartUsed>[];
           }),
       getProgressComments(reportId)
           .then((value) => comments = value)
@@ -134,6 +205,7 @@ class RepairsRepository {
     return RepairExtras(
       details: details,
       detailsFailed: detailsFailed,
+      parts: parts,
       comments: comments,
       transactions: transactions,
     );

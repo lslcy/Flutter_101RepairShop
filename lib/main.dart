@@ -16,6 +16,9 @@ void main() async {
   });
 
   await Supabase.initialize(
+    postgrestOptions: const PostgrestClientOptions(
+      requestTimeout: Duration(seconds: 15),
+    ),
     url: 'https://oyzaakhgbrgsspuasrcb.supabase.co',
     publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95emFha2hnYnJnc3NwdWFzcmNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAyNzAxNjIsImV4cCI6MjEwNTg0NjE2Mn0.rymut2ITkElkMtFJ8ykF910Q6PAx0xjryWIemId1UIU',
   );

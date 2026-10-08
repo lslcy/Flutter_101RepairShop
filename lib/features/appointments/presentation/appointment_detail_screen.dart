@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+
+import '../../../core/utils/app_dates.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_button.dart';
@@ -76,7 +77,7 @@ class _AppointmentDetailScreenState
         scrollable: true,
         title: const Text('Cancel this appointment?'),
         content: Text(
-          '${_appointment!.title}\n${DateFormat.yMMMEd().format(_appointment!.appointmentDate)}\n\nYou can book a new appointment later.',
+          '${_appointment!.title}\n${AppDates.format(_appointment!.appointmentDate, 'EEE, MMM d, y')}\n\nYou can book a new appointment later.',
         ),
         actions: [
           TextButton(
@@ -111,12 +112,19 @@ class _AppointmentDetailScreenState
       } else {
         context.go('/appointments');
       }
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
+      final notCancellable = error is AppointmentNotCancellableException;
       setState(
-        () => _cancelError =
-            'We couldn’t cancel this appointment. Please try again.',
+        () => _cancelError = error is AppointmentNotCancellableException
+            ? error.message
+            : 'We couldn’t cancel this appointment. Please try again.',
       );
+      if (notCancellable) {
+        // Staff changed the status in the web admin; show the latest one.
+        _isCancelling = false;
+        unawaited(_loadAppointment());
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final feedbackContext = _cancelFeedbackKey.currentContext;
         if (!mounted || feedbackContext == null) return;
@@ -176,10 +184,7 @@ class _AppointmentDetailScreenState
   Widget _buildDetails() {
     final theme = Theme.of(context);
     final appointment = _appointment!;
-    final canCancel = ![
-      'cancelled',
-      'completed',
-    ].contains(appointment.status?.toLowerCase());
+    final canCancel = appointment.canCancel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -208,7 +213,7 @@ class _AppointmentDetailScreenState
               const SizedBox(height: AppSpacing.sm),
               Align(
                 alignment: Alignment.centerLeft,
-                child: StatusBadge(status: appointment.status ?? 'Pending'),
+                child: StatusBadge(status: appointment.displayStatus),
               ),
               const SizedBox(height: AppSpacing.md),
               const Divider(),
@@ -216,8 +221,10 @@ class _AppointmentDetailScreenState
               _detailRow(
                 Icons.calendar_today_outlined,
                 'Date',
-                DateFormat('EEEE, MMMM d, yyyy')
-                    .format(appointment.appointmentDate),
+                AppDates.format(
+                  appointment.appointmentDate,
+                  'EEEE, MMMM d, yyyy',
+                ),
               ),
               if (appointment.timeSlot?.trim().isNotEmpty ?? false)
                 _detailRow(

@@ -110,7 +110,8 @@ class Transaction {
     return !isPaid && url.toLowerCase().startsWith('http');
   }
 
-  /// `paid_at ?? payment_date`, formatted for display.
+  /// `paid_at ?? payment_date`, formatted for display. `payment_date` is a
+  /// plain DATE, so it is shown without a time.
   String? get paidOnLabel {
     if (paidAt != null) return AppDates.format(paidAt!, 'MMM d, y');
     if (paymentDate != null) {
@@ -119,41 +120,11 @@ class Transaction {
     return null;
   }
 
-  /// Columns to write when a transaction is marked paid. Both `paid_at`
-  /// (timestamp) and `payment_date` (yyyy-MM-dd) are sent; the DB trigger
-  /// keeps them in sync either way.
-  static Map<String, dynamic> paidUpdate({DateTime? at, String? method}) {
-    final paidAt = at ?? DateTime.now();
-    return {
-      'payment_status': PaymentStatus.paid,
-      'paid_at': AppDates.toTimestampString(paidAt),
-      'payment_date': AppDates.toManilaDateString(paidAt),
-      'payment_method': ?method,
-    };
-  }
+  /// Unpaid/partial bill whose `payment_due` is before today in Manila.
+  bool get isOverdue =>
+      !isPaid && paymentDue != null && AppDates.isPastManilaDate(paymentDue!);
 
-  /// Insert payload that always includes the customer's uuid (`customer_id`
-  /// is NOT NULL) and never writes the legacy `Pending` status.
-  static Map<String, dynamic> insertPayload({
-    required String customerId,
-    required int reportId,
-    double? partsTotal,
-    double? laborTotal,
-    double? totalAmount,
-    String paymentStatus = PaymentStatus.unpaid,
-    DateTime? paymentDue,
-  }) {
-    final status = PaymentStatus.normalize(paymentStatus);
-    return {
-      'customer_id': customerId,
-      'report_id': reportId,
-      'parts_total': partsTotal,
-      'labor_total': laborTotal,
-      'total_amount': totalAmount,
-      'payment_status': status,
-      if (paymentDue != null)
-        'payment_due': AppDates.toDateString(paymentDue),
-      if (status == PaymentStatus.paid) ...paidUpdate(),
-    };
-  }
+  // Customers have SELECT-only access to `transactions` (RLS). Payments are
+  // recorded by staff in the web admin or by PayMongo, so this model has no
+  // insert/update payloads on purpose.
 }
