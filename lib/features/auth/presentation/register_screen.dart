@@ -9,6 +9,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/validation/password_policy.dart';
 import '../../../core/validation/customer_identity.dart';
 import '../../../core/utils/account_errors.dart';
+import '../../../core/utils/form_validation.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/address_input.dart';
@@ -118,19 +119,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     setState(() => _showPasswordErrors = true);
     final invalid = _formKey.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
-      // LayoutBuilder registers the name fields later than the email field.
-      // Follow visual order so the first missing detail receives focus.
-      for (final entry in _fieldFocus.entries) {
-        for (final invalidField in invalid) {
-          final field = invalidField.widget;
-          if (field is TextFormField && field.controller == entry.key) {
-            entry.value.requestFocus();
-            _reveal(invalidField.context);
-            return;
-          }
-        }
-      }
-      _reveal(invalid.first.context);
+      final firstInvalid = firstInvalidFormField(invalid);
+      firstInvalid.context
+          .findAncestorWidgetOfExactType<AppTextField>()
+          ?.focusNode
+          ?.requestFocus();
+      _reveal(firstInvalid.context);
       return;
     }
     FocusScope.of(context).unfocus();
@@ -515,7 +509,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                             controller: _addressController,
                             focusNode: _fieldFocus[_addressController],
                             labelStyle: _fieldLabelStyle,
-                            maxLines: 3,
                             enabled: !_isLoading,
                           ),
                         ],

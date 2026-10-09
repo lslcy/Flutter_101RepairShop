@@ -67,7 +67,7 @@ class AppTheme {
         foregroundColor: scheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        centerTitle: false,
+        centerTitle: true,
         titleSpacing: 24,
       ),
       cardTheme: CardThemeData(

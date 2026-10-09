@@ -255,8 +255,8 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 /// Keeps six destinations reachable without shrinking labels or tap targets.
-/// On compact screens the selected label spans the bar; every icon retains its
-/// native tooltip and screen-reader label. Roomier layouts show all labels.
+/// Compact screens show icons with native tooltips and screen-reader labels.
+/// Roomier layouts show all destination labels.
 class AppBottomNavigationBar extends StatelessWidget {
   const AppBottomNavigationBar({
     super.key,
@@ -320,30 +320,12 @@ class AppBottomNavigationBar extends StatelessWidget {
       final minimumWidth = destinations.length * 48.0;
       return Material(
         color: theme.colorScheme.surface,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (compact)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: ExcludeSemantics(
-                  child: Text(
-                    destinations[selectedIndex].label,
-                    key: const ValueKey('selected-navigation-label'),
-                    style: theme.textTheme.labelLarge,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            if (constraints.maxWidth < minimumWidth)
-              SingleChildScrollView(
+        child: constraints.maxWidth < minimumWidth
+            ? SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(width: minimumWidth, child: navigationBar),
               )
-            else
-              navigationBar,
-          ],
-        ),
+            : navigationBar,
       );
     },
   );

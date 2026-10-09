@@ -144,29 +144,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final addressMissing = _customer?.address?.trim().isEmpty ?? true;
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: ColoredBox(
-                color: Colors.white,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Image.asset(
-                    'assets/images/logo.png',
-                    width: 32,
-                    height: 32,
-                    excludeFromSemantics: true,
-                  ),
+        leading: Center(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: ColoredBox(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: 32,
+                  height: 32,
+                  excludeFromSemantics: true,
                 ),
               ),
             ),
-            const SizedBox(width: 10),
-            const Flexible(
-              child: Text('101 RepairShop', style: AppTextStyles.heading3),
-            ),
-          ],
+          ),
         ),
+        title: const Text('Home', style: AppTextStyles.heading3),
         actions: [
           IconButton(
             tooltip: 'Notifications',

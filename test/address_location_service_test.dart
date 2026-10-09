@@ -223,6 +223,126 @@ void main() {
   });
 
   test(
+    'structured lookup returns separated components from one position',
+    () async {
+      final parts = await service.getCurrentAddressParts();
+      expect(parts.houseUnit, '12');
+      expect(parts.street, 'Rizal Street');
+      expect(parts.barangay, 'Barangay 1');
+      expect(parts.city, 'Davao City');
+      expect(parts.province, 'Davao del Sur');
+      expect(parts.postalCode, '8000');
+      expect(parts.country, 'Philippines');
+      expect(locator.calls, ['enabled', 'permission', 'position']);
+      expect(reverseGeocodeCalls, 1);
+    },
+  );
+
+  test('structured lookup chooses the most complete useful result', () async {
+    placemarks = [
+      const Placemark(country: 'Philippines'),
+      const Placemark(subLocality: 'Barangay 1', locality: 'Davao City'),
+      ...placemarks,
+    ];
+    final parts = await service.getCurrentAddressParts();
+    expect(parts.houseUnit, '12');
+    expect(parts.street, 'Rizal Street');
+    expect(parts.postalCode, '8000');
+    expect(reverseGeocodeCalls, 1);
+  });
+
+  test(
+    'structured lookup preserves a useful partial result to finish manually',
+    () async {
+      placemarks = [
+        const Placemark(
+          subLocality: 'Barangay Apokon',
+          locality: 'Tagum City',
+          country: 'Philippines',
+        ),
+      ];
+      final parts = await service.getCurrentAddressParts();
+      expect(parts.street, isNull);
+      expect(parts.houseUnit, isNull);
+      expect(parts.barangay, 'Barangay Apokon');
+      expect(parts.city, 'Tagum City');
+      expect(parts.province, isNull);
+      expect(parts.country, 'Philippines');
+    },
+  );
+
+  test(
+    'concurrent text and structured requests share the native permission flow',
+    () async {
+      locator.permission = LocationPermission.denied;
+      locator.requestedPermission = LocationPermission.whileInUse;
+      final results = await Future.wait<Object>([
+        service.getCurrentAddress(),
+        service.getCurrentAddressParts(),
+      ]);
+      expect(results.first, startsWith('12 Rizal Street'));
+      expect(locator.calls, ['enabled', 'permission', 'request', 'position']);
+      expect(reverseGeocodeCalls, 1);
+    },
+  );
+
+  test('a later explicit lookup reads a fresh position', () async {
+    await service.getCurrentAddressParts();
+    await service.getCurrentAddressParts();
+    expect(locator.calls.where((call) => call == 'position').length, 2);
+    expect(reverseGeocodeCalls, 2);
+  });
+
+  test('structured lookup uses the same permission denial recovery', () async {
+    locator.permission = LocationPermission.deniedForever;
+    await expectLater(
+      service.getCurrentAddressParts(),
+      throwsA(
+        addressError(
+          'app settings',
+          recovery: LocationRecoveryAction.appSettings,
+        ),
+      ),
+    );
+    expect(locator.calls, ['enabled', 'permission']);
+    expect(reverseGeocodeCalls, 0);
+  });
+
+  test(
+    'structured lookup has no native calls on unsupported platforms',
+    () async {
+      final unsupported = AddressLocationService(
+        geolocator: locator,
+        platformSupported: false,
+      );
+      await expectLater(
+        unsupported.getCurrentAddressParts(),
+        throwsA(addressError('enter your address manually')),
+      );
+      expect(locator.calls, isEmpty);
+    },
+  );
+
+  for (final inadequate in <List<Placemark>>[
+    [],
+    [const Placemark(country: 'Philippines')],
+    [const Placemark(locality: 'Tagum City', country: 'Philippines')],
+    [const Placemark(street: 'Tagum City', locality: 'Tagum City')],
+    [const Placemark(street: '7.07, 125.6', locality: 'Davao City')],
+  ]) {
+    test(
+      'structured lookup rejects city/country/coordinates only: $inadequate',
+      () async {
+        placemarks = inadequate;
+        await expectLater(
+          service.getCurrentAddressParts(),
+          throwsA(addressError('complete address manually')),
+        );
+      },
+    );
+  }
+
+  test(
     'reconstructs a street address when the street field is missing',
     () async {
       placemarks = [

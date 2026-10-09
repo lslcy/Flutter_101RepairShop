@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'package:geolocator/geolocator.dart';
 
+import '../models/address_parts.dart';
+
 final addressLocationServiceProvider = Provider<AddressLocationService>((ref) {
   return AddressLocationService();
 });
@@ -46,8 +48,15 @@ class AddressLocationService {
   final bool isSupported;
   final Duration positionTimeout;
   final Duration geocodingTimeout;
+  Future<List<geocoding.Placemark>>? _pendingLookup;
 
-  Future<String> getCurrentAddress() async {
+  Future<List<geocoding.Placemark>> _getCurrentPlacemarks() {
+    return _pendingLookup ??= _lookupPlacemarks().whenComplete(() {
+      _pendingLookup = null;
+    });
+  }
+
+  Future<List<geocoding.Placemark>> _lookupPlacemarks() async {
     if (!isSupported) {
       throw const AddressLocationException(
         'Phone location is available in the Android and iPhone apps. '
@@ -94,19 +103,10 @@ class AddressLocationService {
             ),
           )
           .timeout(positionTimeout);
-      final placemarks = await _reverseGeocode(
+      return await _reverseGeocode(
         position.latitude,
         position.longitude,
       ).timeout(geocodingTimeout);
-
-      for (final placemark in placemarks) {
-        final address = _formatAddress(placemark);
-        if (address != null) return address;
-      }
-      throw const AddressLocationException(
-        'We found your location but could not find a street address. '
-        'Please enter your complete address manually.',
-      );
     } on AddressLocationException {
       rethrow;
     } on LocationServiceDisabledException {
@@ -130,6 +130,37 @@ class AddressLocationService {
         'Check your connection and try again, or enter it manually.',
       );
     }
+  }
+
+  Future<String> getCurrentAddress() async {
+    final placemarks = await _getCurrentPlacemarks();
+    for (final placemark in placemarks) {
+      final address = _formatAddress(placemark);
+      if (address != null) return address;
+    }
+    throw const AddressLocationException(
+      'We found your location but could not find a street address. '
+      'Please enter your complete address manually.',
+    );
+  }
+
+  /// Returns structured address parts from the device's current location.
+  Future<AddressParts> getCurrentAddressParts() async {
+    final placemarks = await _getCurrentPlacemarks();
+    AddressParts? best;
+    for (final placemark in placemarks) {
+      final candidate = AddressParts.fromPlacemark(placemark);
+      if (!candidate.hasUsefulLocation) continue;
+      if (best == null ||
+          candidate.locationDetailScore > best.locationDetailScore) {
+        best = candidate;
+      }
+    }
+    if (best != null) return best;
+    throw const AddressLocationException(
+      'We found your location but could not find a street address. '
+      'Please enter your complete address manually.',
+    );
   }
 
   Future<bool> openAppSettings() async {
@@ -164,6 +195,7 @@ class AddressLocationService {
   }
 
   static String? _formatAddress(geocoding.Placemark placemark) {
+    if (!AddressParts.fromPlacemark(placemark).hasUsefulLocation) return null;
     final thoroughfare = _clean(placemark.thoroughfare);
     final streetNumber = _clean(placemark.subThoroughfare);
     var street = _clean(placemark.street);

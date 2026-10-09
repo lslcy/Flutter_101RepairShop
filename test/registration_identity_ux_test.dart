@@ -118,11 +118,9 @@ void main() {
       find.widgetWithText(TextButton, 'Add phone number (optional)'),
     );
     await enterField(tester, 'Phone number (optional)', '0917 123 4567');
-    await enterField(
-      tester,
-      'Address (required)',
-      '12 Mabini Street, Davao City',
-    );
+    await enterField(tester, 'Street / subdivision', '12 Mabini Street');
+    await enterField(tester, 'City / municipality (required)', 'Tagum City');
+    await enterField(tester, 'Province (required)', 'Davao del Norte');
     await enterField(tester, 'Password', 'Abcde1!f');
     await enterField(tester, 'Confirm password', 'Abcde1!f');
   }
@@ -190,7 +188,7 @@ void main() {
           'firstName': 'José María',
           'lastName': 'De la Cruz',
           'phoneNo': '+639171234567',
-          'address': '12 Mabini Street, Davao City',
+          'address': '12 Mabini Street, Tagum City, Davao del Norte',
         },
       ]);
       expect(find.textContaining('already').hitTestable(), findsOneWidget);

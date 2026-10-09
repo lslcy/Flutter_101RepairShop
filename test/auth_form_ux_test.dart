@@ -196,7 +196,10 @@ void main() {
         findsNothing,
       );
       expect(find.text('Your details'), findsOneWidget);
-      expect(field('Address (required)'), findsOneWidget);
+      expect(field('Street / subdivision'), findsOneWidget);
+      expect(field('Barangay'), findsOneWidget);
+      expect(field('City / municipality (required)'), findsOneWidget);
+      expect(field('Province (required)'), findsOneWidget);
       expect(find.text('Use my location'), findsOneWidget);
       expect(find.text('At least 8 characters'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -368,13 +371,48 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('Enter your address or use your current location.'),
-        findsOneWidget,
-      );
-      expectFieldFocused(tester, field('Address (required)'));
-      expectFieldVisible(tester, field('Address (required)'));
+      expect(find.text('Enter a street or barangay.'), findsOneWidget);
+      expectFieldFocused(tester, field('Street / subdivision'));
+      expectFieldVisible(tester, field('Street / subdivision'));
       expect(find.byType(RegisterScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'registration focuses address requirements before empty passwords',
+    (tester) async {
+      await pumpForm(tester, const RegisterScreen());
+      for (final entry in {
+        'First name': 'Alex',
+        'Last name': 'Reyes',
+        'Email address': 'alex@example.com',
+      }.entries) {
+        await tester.ensureVisible(field(entry.key));
+        await tester.enterText(field(entry.key), entry.value);
+        await tester.pumpAndSettle();
+      }
+
+      for (final entry in {
+        'Street / subdivision': '12 Mabini Street',
+        'City / municipality (required)': 'Tagum City',
+        'Province (required)': 'Davao del Norte',
+      }.entries) {
+        await tapVisible(
+          tester,
+          find.widgetWithText(AppButton, 'Create account'),
+        );
+        expectFieldFocused(tester, field(entry.key));
+        expectFieldVisible(tester, field(entry.key));
+        await tester.enterText(field(entry.key), entry.value);
+        await tester.pumpAndSettle();
+      }
+      await tapVisible(
+        tester,
+        find.widgetWithText(AppButton, 'Create account'),
+      );
+      expectFieldFocused(tester, field('Password'));
+      expectFieldVisible(tester, field('Password'));
       expect(tester.takeException(), isNull);
     },
   );

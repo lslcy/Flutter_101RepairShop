@@ -149,10 +149,16 @@ void main() {
             await tester.pumpAndSettle();
             expect(selected, index);
             expect(find.bySemanticsLabel(RegExp('^$label\\b')), findsOneWidget);
-            final selectedLabel = tester.widget<Text>(
+            expect(
               find.byKey(const ValueKey('selected-navigation-label')),
+              findsNothing,
             );
-            expect(selectedLabel.data, label);
+            expect(
+              tester
+                  .widget<NavigationBar>(find.byType(NavigationBar))
+                  .labelBehavior,
+              NavigationDestinationLabelBehavior.alwaysHide,
+            );
             expect(tester.takeException(), isNull);
           }
         } finally {
@@ -184,6 +190,48 @@ void main() {
       expect(find.text(destination.label), findsOneWidget);
     }
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Page titles are centered above the compact icon bar', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    const titles = [
+      'Home',
+      'My repairs',
+      'Appointments',
+      'My appliances',
+      'Transactions',
+      'Your profile',
+    ];
+    for (var index = 0; index < titles.length; index++) {
+      await tester.tap(find.byType(NavigationDestination).at(index));
+      await tester.pumpAndSettle();
+      final appBar = find.byType(AppBar);
+      final title = find.descendant(
+        of: appBar,
+        matching: find.text(titles[index]),
+      );
+      expect(title, findsOneWidget);
+      expect(
+        tester.getCenter(title).dx,
+        closeTo(tester.getCenter(appBar).dx, 0.5),
+      );
+      expect(
+        find.byKey(const ValueKey('selected-navigation-label')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    }
+    await tester.tap(find.byType(NavigationDestination).at(0));
+    await tester.pumpAndSettle();
+    final appBar = tester.widget<AppBar>(find.byType(AppBar));
+    expect(appBar.leading, isNotNull);
+    final logo = tester.widget<Image>(
+      find.descendant(of: find.byType(AppBar), matching: find.byType(Image)),
+    );
+    expect(logo.excludeFromSemantics, isTrue);
+    expect(find.byTooltip('Notifications'), findsOneWidget);
   });
 
   testWidgets(

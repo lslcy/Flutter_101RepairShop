@@ -192,11 +192,8 @@ void main() {
 
         await enterField(tester, 'Last name', 'Reyes');
         await tapVisible(tester, saveButton());
-        expect(
-          find.text('Enter your address or use your current location.'),
-          findsOneWidget,
-        );
-        expectFocused(tester, 'Address (required)');
+        expect(find.text('Enter a street or barangay.'), findsOneWidget);
+        expectFocused(tester, 'Street / subdivision');
         expect(flow.savedDetails, isEmpty);
         expect(
           router.routeInformationProvider.value.uri.path,
@@ -226,18 +223,16 @@ void main() {
       tester.widget<TextFormField>(field('Last name')).controller!.text,
       'Reyes',
     );
-    await enterField(
-      tester,
-      'Address (required)',
-      '12 Mabini Street, Davao City',
-    );
+    await enterField(tester, 'Street / subdivision', '12 Mabini Street');
+    await enterField(tester, 'City / municipality (required)', 'Tagum City');
+    await enterField(tester, 'Province (required)', 'Davao del Norte');
     await tapVisible(tester, saveButton());
 
     expect(flow.savedDetails, [
       {
         'firstName': 'Alex',
         'lastName': 'Reyes',
-        'address': '12 Mabini Street, Davao City',
+        'address': '12 Mabini Street, Tagum City, Davao del Norte',
       },
     ]);
     expect(router.routeInformationProvider.value.uri.path, '/');
@@ -301,10 +296,10 @@ void main() {
       );
       expect(
         tester
-            .widget<TextFormField>(field('Address (required)'))
+            .widget<TextFormField>(field('Street / subdivision'))
             .controller!
             .text,
-        '12 Mabini Street, Davao City',
+        contains('Mabini Street'),
       );
       expect(tester.widget<AppButton>(saveButton()).onPressed, isNotNull);
       expect(

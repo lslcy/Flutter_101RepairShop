@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
 import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
+import 'package:flutter_101repairshop/core/widgets/address_input.dart';
 import 'package:flutter_101repairshop/features/profile/data/customer_repository.dart';
 import 'package:flutter_101repairshop/features/profile/presentation/edit_profile_screen.dart';
 import 'package:flutter_101repairshop/features/profile/presentation/profile_screen.dart';
@@ -16,8 +17,8 @@ import 'package:flutter_101repairshop/features/shared/models/customer.dart';
 const _originalAddress =
     'Unit 1204, Building Three, 123 Mabini Street, Barangay San Antonio, '
     'Buhangin District, Davao City, Davao del Sur, Philippines 8000';
-const _multilineAddress =
-    'Unit 8, 45 Jacinto Street\nBarangay San Pedro\nDavao City, 8000';
+const _updatedAddress =
+    'Unit 8, 45 Jacinto Street, Barangay San Pedro, Tagum City, Davao del Norte, 8100';
 
 class _Customers extends CustomerRepository {
   Customer current = Customer(
@@ -65,7 +66,7 @@ void main() {
   });
 
   Finder addressField() => find.descendant(
-    of: find.widgetWithText(AppTextField, 'Address (required)'),
+    of: find.widgetWithText(AppTextField, 'Street / subdivision'),
     matching: find.byType(TextFormField),
   );
 
@@ -122,7 +123,7 @@ void main() {
   }
 
   testWidgets(
-    'Saving a multiline address preserves customer data and refreshes the profile',
+    'Saving separate address fields preserves customer data and refreshes the profile',
     (tester) async {
       final customers = _Customers();
       final original = customers.current;
@@ -130,13 +131,29 @@ void main() {
       expect(find.text(_originalAddress), findsOneWidget);
       await tapVisible(tester, find.text('Edit address'));
 
-      await tester.ensureVisible(addressField());
-      await tester.enterText(addressField(), '  $_multilineAddress  ');
+      for (final entry in {
+        'House / unit no. (optional)': 'Unit 8',
+        'Street / subdivision': '45 Jacinto Street',
+        'Barangay': 'Barangay San Pedro',
+        'City / municipality (required)': 'Tagum City',
+        'Province (required)': 'Davao del Norte',
+        'Postal code (optional)': '8100',
+      }.entries) {
+        final target = find.descendant(
+          of: find.widgetWithText(AppTextField, entry.key),
+          matching: find.byType(TextFormField),
+        );
+        await tester.ensureVisible(target);
+        await tester.enterText(target, entry.value);
+        await tester.pumpAndSettle();
+      }
       await tapVisible(tester, find.text('Save changes'));
 
       expect(customers.saved, hasLength(1));
       final saved = customers.saved.single;
-      expect(saved.address, _multilineAddress);
+      for (final part in _updatedAddress.split(', ')) {
+        expect(saved.address, contains(part));
+      }
       expect(saved.id, original.id);
       expect(saved.authId, original.authId);
       expect(saved.profilePicture, original.profilePicture);
@@ -150,7 +167,7 @@ void main() {
         CustomerIdentity.normalizeOptionalPhone(original.phoneNo),
       );
       expect(find.byType(EditProfileScreen), findsNothing);
-      expect(find.text(_multilineAddress), findsOneWidget);
+      expect(find.text(saved.address!), findsOneWidget);
       expect(find.text(_originalAddress), findsNothing);
 
       expect(tester.takeException(), isNull);
@@ -164,16 +181,19 @@ void main() {
       await pumpProfile(tester, customers);
       await tapVisible(tester, find.text('Edit address'));
       await tester.ensureVisible(addressField());
-      await tester.enterText(addressField(), '  \n  ');
+      await tester.enterText(addressField(), '  ');
+      final barangay = find.descendant(
+        of: find.widgetWithText(AppTextField, 'Barangay'),
+        matching: find.byType(TextFormField),
+      );
+      await tester.ensureVisible(barangay);
+      await tester.enterText(barangay, '  ');
       await tapVisible(tester, find.text('Save changes'));
 
       expect(customers.saved, isEmpty);
       expect(customers.current.address, _originalAddress);
       expect(find.byType(EditProfileScreen), findsOneWidget);
-      expect(
-        find.text('Enter your address or use your current location.'),
-        findsOneWidget,
-      );
+      expect(find.text('Enter a street or barangay.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -197,7 +217,7 @@ void main() {
       await tester.ensureVisible(addressField());
       await tester.pumpAndSettle();
       expect(
-        tester.widget<TextFormField>(addressField()).controller!.text,
+        tester.widget<AddressInput>(find.byType(AddressInput)).controller.text,
         _originalAddress,
       );
       await tester.ensureVisible(find.text('Save changes'));

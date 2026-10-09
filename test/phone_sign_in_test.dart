@@ -201,7 +201,7 @@ void main() {
     await pumpForm(tester, auth);
     expect(find.text('Country code'), findsOneWidget);
     expect(find.text('Philippines (+63)'), findsOneWidget);
-    expect(find.text('+63 will be added automatically.'), findsOneWidget);
+    expect(find.text('+63 will be added automatically.'), findsNothing);
     expect(
       find.text('Use 09 in the Philippines, or +country code.'),
       findsNothing,
@@ -257,7 +257,7 @@ void main() {
       expect(find.text('${example.$1} (${example.$2})'), findsOneWidget);
       expect(
         find.text('${example.$2} will be added automatically.'),
-        findsOneWidget,
+        findsNothing,
       );
       await tester.ensureVisible(field('Phone number'));
       await tester.enterText(field('Phone number'), example.$3);
@@ -328,7 +328,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tapVisible(tester, italy);
         expect(find.text('Italy (+39)'), findsOneWidget);
-        expect(find.text('+39 will be added automatically.'), findsOneWidget);
+        expect(find.text('+39 will be added automatically.'), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );

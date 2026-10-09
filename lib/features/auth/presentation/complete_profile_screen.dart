@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/load_errors.dart';
 import '../../../core/utils/account_errors.dart';
+import '../../../core/utils/form_validation.dart';
 import '../../../core/validation/customer_identity.dart';
 import '../../../core/widgets/address_input.dart';
 import '../../../core/widgets/app_button.dart';
@@ -52,24 +53,11 @@ class _CompleteProfileScreenState extends ConsumerState<CompleteProfileScreen> {
     if (_busy) return;
     final invalid = _form.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
-      final controllers = [_first, _last, _address];
-      final nodes = [_firstFocus, _lastFocus, _addressFocus];
-      final firstInvalid =
-          controllers
-              .expand(
-                (controller) => invalid.where(
-                  (field) =>
-                      field.widget is TextFormField &&
-                      (field.widget as TextFormField).controller == controller,
-                ),
-              )
-              .firstOrNull ??
-          invalid.first;
-      final widget = firstInvalid.widget;
-      if (widget is TextFormField) {
-        final index = controllers.indexOf(widget.controller!);
-        if (index >= 0) nodes[index].requestFocus();
-      }
+      final firstInvalid = firstInvalidFormField(invalid);
+      firstInvalid.context
+          .findAncestorWidgetOfExactType<AppTextField>()
+          ?.focusNode
+          ?.requestFocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && firstInvalid.mounted) {
           Scrollable.ensureVisible(
@@ -259,7 +247,6 @@ class _CompleteProfileScreenState extends ConsumerState<CompleteProfileScreen> {
                                   controller: _address,
                                   focusNode: _addressFocus,
                                   enabled: !_busy,
-                                  maxLines: 3,
                                 ),
                                 const SizedBox(height: 24),
                               ],

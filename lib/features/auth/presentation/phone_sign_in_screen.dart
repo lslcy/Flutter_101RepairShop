@@ -361,8 +361,6 @@ class _PhoneSignInScreenState extends ConsumerState<PhoneSignInScreen> {
                           hint: _countryCode == 'PH'
                               ? '912 345 6789'
                               : 'Phone number',
-                          helperText:
-                              '$callingCode will be added automatically.',
                           prefixIcon: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/account_errors.dart';
+import '../../../core/utils/form_validation.dart';
 import '../../../core/validation/customer_identity.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
@@ -84,19 +85,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     }
     final invalid = _formKey.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
-      final firstInvalid =
-          _fieldFocus.keys
-              .expand(
-                (controller) => invalid.where(
-                  (state) =>
-                      state.widget is TextFormField &&
-                      (state.widget as TextFormField).controller == controller,
-                ),
-              )
-              .firstOrNull ??
-          invalid.first;
-      final field = firstInvalid.widget;
-      if (field is TextFormField) _fieldFocus[field.controller]?.requestFocus();
+      final firstInvalid = firstInvalidFormField(invalid);
+      firstInvalid.context
+          .findAncestorWidgetOfExactType<AppTextField>()
+          ?.focusNode
+          ?.requestFocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !firstInvalid.mounted) return;
         Scrollable.ensureVisible(

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/address_parts.dart';
 import '../services/address_location_service.dart';
+import '../theme/app_spacing.dart';
 import 'app_text_field.dart';
 
-/// A required address with manual input and an optional, user-initiated lookup.
+export '../models/address_parts.dart';
+
+/// Editable address fields with a single, user-initiated location lookup.
 class AddressInput extends ConsumerStatefulWidget {
   const AddressInput({
     super.key,
@@ -12,25 +16,185 @@ class AddressInput extends ConsumerStatefulWidget {
     this.enabled = true,
     this.focusNode,
     this.labelStyle,
-    this.maxLines = 4,
   });
 
+  /// Stores the readable address expected by the existing customer repository.
   final TextEditingController controller;
   final bool enabled;
   final FocusNode? focusNode;
   final TextStyle? labelStyle;
-  final int maxLines;
 
   @override
   ConsumerState<AddressInput> createState() => _AddressInputState();
 }
 
 class _AddressInputState extends ConsumerState<AddressInput> {
+  final _houseController = TextEditingController();
+  final _streetController = TextEditingController();
+  final _barangayController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _provinceController = TextEditingController();
+  final _postalCodeController = TextEditingController();
+  final _houseFocus = FocusNode();
+  final _streetFocus = FocusNode();
+  final _barangayFocus = FocusNode();
+  final _cityFocus = FocusNode();
+  final _provinceFocus = FocusNode();
+  final _postalFocus = FocusNode();
+
+  AddressParts _metadata = const AddressParts();
+  bool _updatingFields = false;
+  bool _writingMain = false;
+  bool _legacyUnedited = false;
+  bool _houseEdited = false;
+  List<String> _lastFieldTexts = const [];
+  String _lastMainText = '';
   bool _locating = false;
-  String? _suggestion;
+  bool _messageIsError = false;
   String? _message;
   LocationRecoveryAction _recoveryAction = LocationRecoveryAction.none;
   int _request = 0;
+
+  List<TextEditingController> get _subControllers => [
+    _houseController,
+    _streetController,
+    _barangayController,
+    _cityController,
+    _provinceController,
+    _postalCodeController,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _hydrate();
+    for (final controller in _subControllers) {
+      controller.addListener(_fieldsChanged);
+    }
+    widget.controller.addListener(_mainChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant AddressInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_mainChanged);
+      widget.controller.addListener(_mainChanged);
+      _request++;
+      _locating = false;
+      _message = null;
+      _recoveryAction = LocationRecoveryAction.none;
+      _hydrateAfterBuild();
+    }
+    if (!widget.enabled && oldWidget.enabled) {
+      _request++;
+      _locating = false;
+    }
+  }
+
+  void _hydrate() {
+    _lastMainText = widget.controller.text;
+    _metadata = AddressParts.fromString(widget.controller.text);
+    _legacyUnedited = widget.controller.text.trim().isNotEmpty;
+    _houseEdited = _metadata.houseUnit?.trim().isNotEmpty ?? false;
+    _updatingFields = true;
+    try {
+      _houseController.text = _metadata.houseUnit ?? '';
+      _streetController.text = _metadata.street ?? '';
+      _barangayController.text = _metadata.barangay ?? '';
+      _cityController.text = _metadata.city ?? '';
+      _provinceController.text = _metadata.province ?? '';
+      _postalCodeController.text = _metadata.postalCode ?? '';
+      _captureFieldTexts();
+    } finally {
+      _updatingFields = false;
+    }
+  }
+
+  void _hydrateAfterBuild() {
+    final controller = widget.controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.controller != controller) return;
+      _hydrate();
+      setState(() {});
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _mainChanged() {
+    if (_writingMain || widget.controller.text == _lastMainText) return;
+    _request++;
+    _locating = false;
+    _message = null;
+    _recoveryAction = LocationRecoveryAction.none;
+    _hydrateAfterBuild();
+  }
+
+  void _captureFieldTexts() {
+    _lastFieldTexts = _subControllers
+        .map((controller) => controller.text)
+        .toList();
+  }
+
+  void _fieldsChanged() {
+    if (_updatingFields) return;
+    final texts = _subControllers.map((controller) => controller.text).toList();
+    if (texts.asMap().entries.every(
+      (entry) => entry.value == _lastFieldTexts[entry.key],
+    )) {
+      return;
+    }
+    if (texts.first != _lastFieldTexts.first) _houseEdited = true;
+    _lastFieldTexts = texts;
+    _legacyUnedited = false;
+    _request++;
+    _locating = false;
+    _message = null;
+    _recoveryAction = LocationRecoveryAction.none;
+    _syncMain();
+    if (mounted) setState(() {});
+  }
+
+  AddressParts get _currentParts => AddressParts(
+    houseUnit: _houseController.text,
+    street: _streetController.text,
+    barangay: _barangayController.text,
+    city: _cityController.text,
+    province: _provinceController.text,
+    postalCode: _postalCodeController.text,
+    country: _metadata.country,
+    additionalDetails: _metadata.additionalDetails,
+  );
+
+  void _syncMain() {
+    final combined = _currentParts.combine();
+    if (widget.controller.text == combined) return;
+    _lastMainText = combined;
+    _writingMain = true;
+    try {
+      widget.controller.value = TextEditingValue(
+        text: combined,
+        selection: TextSelection.collapsed(offset: combined.length),
+      );
+    } finally {
+      _writingMain = false;
+    }
+  }
+
+  bool get _hasLocalDetail =>
+      _streetController.text.trim().isNotEmpty ||
+      _barangayController.text.trim().isNotEmpty;
+
+  bool get _isComplete =>
+      _hasLocalDetail &&
+      _cityController.text.trim().isNotEmpty &&
+      _provinceController.text.trim().isNotEmpty;
+
+  void _fillIfAvailable(TextEditingController controller, String? value) {
+    if (value != null && value.trim().isNotEmpty) {
+      controller.text = value.trim();
+    }
+  }
 
   Future<void> _useLocation() async {
     if (_locating || !widget.enabled) return;
@@ -38,42 +202,60 @@ class _AddressInputState extends ConsumerState<AddressInput> {
     final request = ++_request;
     setState(() {
       _locating = true;
-      _suggestion = null;
       _message = null;
       _recoveryAction = LocationRecoveryAction.none;
     });
     try {
-      final address = await ref
+      final parts = await ref
           .read(addressLocationServiceProvider)
-          .getCurrentAddress();
-      if (!mounted || request != _request) return;
+          .getCurrentAddressParts();
+      if (!mounted || request != _request || !widget.enabled) return;
+      _updatingFields = true;
+      try {
+        if (!_houseEdited) _fillIfAvailable(_houseController, parts.houseUnit);
+        _fillIfAvailable(_streetController, parts.street);
+        _fillIfAvailable(_barangayController, parts.barangay);
+        _fillIfAvailable(_cityController, parts.city);
+        _fillIfAvailable(_provinceController, parts.province);
+        _fillIfAvailable(_postalCodeController, parts.postalCode);
+        _metadata = parts;
+        _legacyUnedited = false;
+        _captureFieldTexts();
+      } finally {
+        _updatingFields = false;
+      }
+      _syncMain();
       setState(() {
-        if (address.trim().isEmpty) {
-          _message = 'No address was found. Please type your address below.';
-        } else {
-          _suggestion = address.trim();
-        }
+        _messageIsError = false;
+        _message = _isComplete
+            ? 'Address filled in. Review the details and add your house or unit number if needed.'
+            : 'Location found. Fill in the missing address details below.';
       });
     } on AddressLocationException catch (error) {
-      if (!mounted || request != _request) return;
+      if (!mounted || request != _request || !widget.enabled) return;
       setState(() {
+        _messageIsError = true;
         _message = error.message;
         _recoveryAction = error.recoveryAction;
       });
     } catch (_) {
-      if (!mounted || request != _request) return;
-      setState(
-        () => _message =
-            'We could not find your address. Try again or enter it manually.',
-      );
+      if (!mounted || request != _request || !widget.enabled) return;
+      setState(() {
+        _messageIsError = true;
+        _message =
+            'We could not find your address. Try again or enter it manually.';
+      });
     } finally {
-      if (mounted && request == _request) setState(() => _locating = false);
+      if (mounted && request == _request) {
+        setState(() => _locating = false);
+      }
     }
   }
 
-  void _cancelLookup() {
+  void _enterManually() {
     _request++;
     setState(() => _locating = false);
+    _streetFocus.requestFocus();
   }
 
   Future<void> _openSettings() async {
@@ -85,30 +267,36 @@ class _AddressInputState extends ConsumerState<AddressInput> {
       if (!mounted) return;
       setState(() {
         _message = opened
-            ? 'After enabling location, tap Use my location again, or type your address below.'
-            : 'Open your phone settings to allow location, or type your address below.';
+            ? 'After enabling location, tap Use my location again.'
+            : 'Open your phone settings to allow location, or enter your address manually.';
       });
     } catch (_) {
-      if (mounted) {
-        setState(
-          () => _message = 'Open your phone settings to allow location, or type your address below.',
-        );
-      }
+      if (!mounted) return;
+      setState(() {
+        _message = 'Open your phone settings to allow location, or enter your address manually.';
+      });
     }
   }
 
-  void _applySuggestion() {
-    if (!widget.enabled || _suggestion == null) return;
-    final address = _suggestion!;
-    widget.controller.value = TextEditingValue(
-      text: address,
-      selection: TextSelection.collapsed(offset: address.length),
-    );
-    setState(() {
-      _suggestion = null;
-      _message = 'Address filled in. Review it and add your house or unit number if needed.';
-      _recoveryAction = LocationRecoveryAction.none;
-    });
+  @override
+  void dispose() {
+    _request++;
+    widget.controller.removeListener(_mainChanged);
+    for (final controller in _subControllers) {
+      controller.removeListener(_fieldsChanged);
+      controller.dispose();
+    }
+    for (final focus in [
+      _houseFocus,
+      _streetFocus,
+      _barangayFocus,
+      _cityFocus,
+      _provinceFocus,
+      _postalFocus,
+    ]) {
+      focus.dispose();
+    }
+    super.dispose();
   }
 
   @override
@@ -117,12 +305,10 @@ class _AddressInputState extends ConsumerState<AddressInput> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Use your phone location or enter your complete address below.',
-        ),
-        const SizedBox(height: 8),
+        const Text('Enter a street or barangay, plus your city and province.'),
+        const SizedBox(height: AppSpacing.sm),
         Wrap(
-          spacing: 8,
+          spacing: AppSpacing.sm,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
@@ -142,57 +328,20 @@ class _AddressInputState extends ConsumerState<AddressInput> {
             ),
             if (_locating)
               TextButton(
-                onPressed: _cancelLookup,
+                onPressed: _enterManually,
                 child: const Text('Enter manually'),
               ),
           ],
         ),
-        if (_suggestion != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: colors.primaryContainer,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Address found',
-                  style: TextStyle(
-                    color: colors.onPrimaryContainer,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _suggestion!,
-                  style: TextStyle(color: colors.onPrimaryContainer),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Check that this is the address you want to save.',
-                  style: TextStyle(color: colors.onPrimaryContainer),
-                ),
-                TextButton(
-                  onPressed: widget.enabled ? _applySuggestion : null,
-                  style: TextButton.styleFrom(
-                    foregroundColor: colors.onPrimaryContainer,
-                  ),
-                  child: const Text('Use this address'),
-                ),
-              ],
-            ),
-          ),
-        ],
         if (_message != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Semantics(
             liveRegion: true,
             child: Text(
               _message!,
-              style: TextStyle(color: colors.onSurfaceVariant),
+              style: TextStyle(
+                color: _messageIsError ? colors.error : colors.onSurfaceVariant,
+              ),
             ),
           ),
           if (_recoveryAction != LocationRecoveryAction.none)
@@ -205,24 +354,94 @@ class _AddressInputState extends ConsumerState<AddressInput> {
               ),
             ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         AppTextField(
-          label: 'Address (required)',
+          label: 'House / unit no. (optional)',
           labelStyle: widget.labelStyle,
-          hint: 'House / unit, street, barangay, city, province',
-          helperText:
-              'Include your postal code and a nearby landmark if helpful.',
-          controller: widget.controller,
-          focusNode: widget.focusNode,
+          hint: 'e.g. Unit 5, Block 3',
+          controller: _houseController,
+          focusNode: widget.focusNode ?? _houseFocus,
+          enabled: widget.enabled,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onFieldSubmitted: (_) => _streetFocus.requestFocus(),
+          autofillHints: const [AutofillHints.streetAddressLevel4],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppTextField(
+          label: 'Street / subdivision',
+          labelStyle: widget.labelStyle,
+          hint: 'e.g. Rizal Avenue',
+          controller: _streetController,
+          focusNode: _streetFocus,
           enabled: widget.enabled,
           keyboardType: TextInputType.streetAddress,
-          textInputAction: TextInputAction.newline,
           textCapitalization: TextCapitalization.words,
-          autofillHints: const [AutofillHints.fullStreetAddress],
-          maxLines: widget.maxLines,
-          validator: (value) => value == null || value.trim().isEmpty
-              ? 'Enter your address or use your current location.'
+          textInputAction: TextInputAction.next,
+          onFieldSubmitted: (_) => _barangayFocus.requestFocus(),
+          autofillHints: const [AutofillHints.streetAddressLine1],
+          validator: (_) => !_legacyUnedited && !_hasLocalDetail
+              ? 'Enter a street or barangay.'
               : null,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppTextField(
+          label: 'Barangay',
+          labelStyle: widget.labelStyle,
+          hint: 'e.g. Mankilam',
+          controller: _barangayController,
+          focusNode: _barangayFocus,
+          enabled: widget.enabled,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onFieldSubmitted: (_) => _cityFocus.requestFocus(),
+          autofillHints: const [AutofillHints.streetAddressLevel3],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppTextField(
+          label: 'City / municipality (required)',
+          labelStyle: widget.labelStyle,
+          hint: 'e.g. Tagum City',
+          controller: _cityController,
+          focusNode: _cityFocus,
+          enabled: widget.enabled,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onFieldSubmitted: (_) => _provinceFocus.requestFocus(),
+          autofillHints: const [AutofillHints.addressCity],
+          validator: (value) =>
+              !_legacyUnedited && (value?.trim().isEmpty ?? true)
+              ? 'Enter your city or municipality.'
+              : null,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppTextField(
+          label: 'Province (required)',
+          labelStyle: widget.labelStyle,
+          hint: 'e.g. Davao del Norte',
+          controller: _provinceController,
+          focusNode: _provinceFocus,
+          enabled: widget.enabled,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onFieldSubmitted: (_) => _postalFocus.requestFocus(),
+          autofillHints: const [AutofillHints.addressState],
+          validator: (value) =>
+              !_legacyUnedited && (value?.trim().isEmpty ?? true)
+              ? 'Enter your province.'
+              : null,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppTextField(
+          label: 'Postal code (optional)',
+          labelStyle: widget.labelStyle,
+          hint: 'e.g. 8100',
+          controller: _postalCodeController,
+          focusNode: _postalFocus,
+          enabled: widget.enabled,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.postalCode],
         ),
       ],
     );
