@@ -9,6 +9,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/validation/password_policy.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/widgets/password_requirements.dart';
 import '../data/auth_flow_controller.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
@@ -29,6 +30,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _isSaving = false;
+  bool _showPasswordErrors = false;
   bool _isLeaving = false;
   String? _errorMessage;
 
@@ -43,12 +45,18 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   @override
   void initState() {
     super.initState();
+    _passwordFocus.addListener(_onPasswordFocusChanged);
     _passwordController.addListener(_onPasswordsChanged);
     _confirmController.addListener(_onPasswordsChanged);
   }
 
+  void _onPasswordFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _passwordFocus.removeListener(_onPasswordFocusChanged);
     _passwordController.dispose();
     _confirmController.dispose();
     _passwordFocus.dispose();
@@ -98,13 +106,14 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       return 'We could not connect. Check your internet connection and try again.';
     }
     if (error is AuthException && error.code == 'weak_password') {
-      return 'This password was not accepted. Try a longer, unique password.';
+      return 'This password was not accepted. ${PasswordPolicy.requirementsMessage}';
     }
     return 'We could not save your password. Please try again.';
   }
 
   Future<void> _savePassword() async {
     if (_isBusy) return;
+    setState(() => _showPasswordErrors = true);
     final invalid = _formKey.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
       final field = invalid.first.widget as TextFormField;
@@ -199,9 +208,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       padding: const EdgeInsets.only(top: 8),
       child: Semantics(
         liveRegion: true,
-        label: label == 'At least 8 characters'
-            ? 'Password requirement${isMet ? ' met' : ''}: at least 8 characters'
-            : label,
+        label: label,
         excludeSemantics: true,
         child: Row(
           children: [
@@ -261,9 +268,10 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 ),
               ),
             ),
-            _passwordFeedback(
-              isMet: _passwordIsValid,
-              label: 'At least 8 characters',
+            PasswordRequirements(
+              password: _passwordController.text,
+              showErrors: _showPasswordErrors,
+              isEditing: _passwordFocus.hasFocus,
             ),
             const SizedBox(height: 20),
             AppTextField(

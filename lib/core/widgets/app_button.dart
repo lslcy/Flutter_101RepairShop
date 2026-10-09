@@ -9,6 +9,7 @@ class AppButton extends StatelessWidget {
   final bool isLoading;
   final bool isOutlined;
   final IconData? icon;
+  final Widget? leading;
   final double? width;
 
   const AppButton({
@@ -19,6 +20,7 @@ class AppButton extends StatelessWidget {
     this.isLoading = false,
     this.isOutlined = false,
     this.icon,
+    this.leading,
     this.width,
   });
 
@@ -28,7 +30,7 @@ class AppButton extends StatelessWidget {
     final child = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (isLoading || icon != null) ...[
+        if (isLoading || icon != null || leading != null) ...[
           SizedBox(
             width: 20,
             height: 20,
@@ -43,7 +45,7 @@ class AppButton extends StatelessWidget {
                           strokeWidth: 2,
                           color: colors.onSurfaceVariant,
                         )
-                : Icon(icon, size: 20),
+                : leading ?? Icon(icon, size: 20),
           ),
           const SizedBox(width: 10),
         ],

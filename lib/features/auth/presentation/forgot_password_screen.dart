@@ -23,6 +23,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _emailFocus = FocusNode();
+  final _scrollController = ScrollController();
   bool _isLoading = false;
   bool _emailSent = false;
   String? _errorMessage;
@@ -37,6 +38,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   void dispose() {
     _emailController.dispose();
     _emailFocus.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -66,7 +68,14 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       await ref
           .read(authStateProvider.notifier)
           .resetPassword(_emailController.text.trim());
-      if (mounted) setState(() => _emailSent = true);
+      if (mounted) {
+        setState(() => _emailSent = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.jumpTo(0);
+          }
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       final message = error.toString().toLowerCase();
@@ -113,16 +122,17 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       body: SafeArea(
         top: false,
         child: SingleChildScrollView(
+          controller: _scrollController,
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
+          padding: EdgeInsets.fromLTRB(
+            MediaQuery.sizeOf(context).width < 360 ? 20 : AppSpacing.lg,
             AppSpacing.sm,
-            AppSpacing.lg,
+            MediaQuery.sizeOf(context).width < 360 ? 20 : AppSpacing.lg,
             AppSpacing.xl,
           ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
+              constraints: const BoxConstraints(maxWidth: 480),
               child: _emailSent ? _buildSuccessView() : _buildFormView(),
             ),
           ),
@@ -231,61 +241,134 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
 
   Widget _buildSuccessView() {
     final colors = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: colors.primaryContainer,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-              ),
-              child: Icon(
-                Icons.mark_email_read_outlined,
-                size: 32,
-                color: colors.onPrimaryContainer,
-              ),
+    final email = _emailController.text.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          liveRegion: true,
+          child: Container(
+            key: const ValueKey('reset-email-confirmation'),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerLowest,
+              border: Border.all(color: colors.outlineVariant),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: colors.primaryContainer,
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.radiusMd,
+                        ),
+                      ),
+                      child: ExcludeSemantics(
+                        child: Icon(
+                          Icons.mark_email_read_outlined,
+                          size: 24,
+                          color: colors.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Semantics(
+                        header: true,
+                        child: Text(
+                          'Check your email',
+                          style: AppTextStyles.heading2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'If an account uses this email, a password reset link will arrive shortly.',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SelectableText(
+                  email,
+                  key: const ValueKey('reset-email-address'),
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: colors.onSurface,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Check your email', style: AppTextStyles.heading1),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'If an account uses ${_emailController.text.trim()}, a password reset link will arrive shortly.',
-            style: AppTextStyles.body.copyWith(color: colors.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.open_in_new_outlined,
+                color: colors.primary,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Open the latest email',
+                    style: AppTextStyles.bodyMedium,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Use the link on this device to reset your password.',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          'No email yet? Check your spam folder.',
+          style: AppTextStyles.bodySmall.copyWith(
+            color: colors.onSurfaceVariant,
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            'Open the latest link on this device. Check your spam folder if it does not arrive.',
-            style: AppTextStyles.body,
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          AppButton(
-            label: 'Back to sign in',
-            onPressed: () =>
-                context.go('/login', extra: _emailController.text.trim()),
-            width: double.infinity,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: () {
-              setState(() {
-                _emailSent = false;
-                _errorMessage = null;
-              });
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _emailFocus.requestFocus();
-              });
-            },
-            child: const Text('Use a different email'),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        AppButton(
+          label: 'Back to sign in',
+          onPressed: () => context.go('/login', extra: email),
+          width: double.infinity,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        TextButton(
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          onPressed: () {
+            setState(() {
+              _emailSent = false;
+              _errorMessage = null;
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _emailFocus.requestFocus();
+            });
+          },
+          child: const Text('Use a different email'),
+        ),
+      ],
     );
   }
 }

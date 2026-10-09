@@ -283,16 +283,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ],
                       ],
                     ],
-                    const SizedBox(height: 24),
-                    Semantics(
-                      header: true,
-                      child: Text(
-                        'Your account',
-                        style: AppTextStyles.heading3,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildQuickActions(),
                   ],
                 ),
               ),
@@ -341,79 +331,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      children: [
-        AppCard(
-          onTap: () => context.push('/profile/appliances'),
-          child: Row(
-            children: [
-              Icon(Icons.devices_outlined, color: scheme.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'My appliances',
-                      style: AppTextStyles.bodyMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Manage your registered devices',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_outlined,
-                color: scheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        AppCard(
-          onTap: () => context.push('/profile/transactions'),
-          child: Row(
-            children: [
-              Icon(Icons.receipt_long_outlined, color: scheme.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Payment history',
-                      style: AppTextStyles.bodyMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Review your repair payments',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_outlined,
-                color: scheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 

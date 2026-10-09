@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/data/auth_flow_controller.dart';
 import '../../features/auth/presentation/reset_password_screen.dart';
+import '../../features/auth/presentation/complete_profile_screen.dart';
+import '../../features/auth/presentation/phone_sign_in_screen.dart';
 
 import '../../features/auth/presentation/welcome_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
@@ -32,6 +34,12 @@ final _shellNavigatorRepairsKey = GlobalKey<NavigatorState>(
 final _shellNavigatorAppointmentsKey = GlobalKey<NavigatorState>(
   debugLabel: 'appointments',
 );
+final _shellNavigatorAppliancesKey = GlobalKey<NavigatorState>(
+  debugLabel: 'appliances',
+);
+final _shellNavigatorPaymentsKey = GlobalKey<NavigatorState>(
+  debugLabel: 'payments',
+);
 final _shellNavigatorProfileKey = GlobalKey<NavigatorState>(
   debugLabel: 'profile',
 );
@@ -53,11 +61,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         return null;
       }
       if (authFlow.isRegistering && location == '/register') return null;
+      if (authFlow.requiresSignInProfile) {
+        return location == '/complete-profile' ? null : '/complete-profile';
+      }
+      if (location == '/complete-profile' && isLoggedIn) return '/';
+      if (!isLoggedIn &&
+          authFlow.googleSignInError != null &&
+          (location == '/welcome' || location == '/login-callback')) {
+        return '/login';
+      }
       final isAuthRoute =
           location == '/welcome' ||
           location == '/login' ||
           location == '/register' ||
-          location == '/forgot-password';
+          location == '/forgot-password' ||
+          location == '/phone-sign-in' ||
+          location == '/login-callback';
 
       // Not logged in and not on auth page -> go to welcome
       if (!isLoggedIn && !isAuthRoute) return '/welcome';
@@ -68,6 +87,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/phone-sign-in',
+        builder: (_, _) => const PhoneSignInScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/login-callback',
+        builder: (_, _) => const LoginScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/complete-profile',
+        builder: (_, _) => const CompleteProfileScreen(),
+      ),
       // Auth routes (full screen on root navigator)
       GoRoute(
         parentNavigatorKey: _rootNavigatorKey,
@@ -122,11 +156,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/book-appointment',
         builder: (_, _) => const BookAppointmentScreen(),
       ),
-      GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
-        path: '/profile/appliances',
-        builder: (_, _) => const AppliancesScreen(),
-      ),
+
       GoRoute(
         parentNavigatorKey: _rootNavigatorKey,
         path: '/profile/appliances/add',
@@ -137,11 +167,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/profile/edit',
         builder: (_, _) => const EditProfileScreen(),
       ),
-      GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
-        path: '/profile/transactions',
-        builder: (_, _) => const TransactionHistoryScreen(),
-      ),
+
       GoRoute(
         parentNavigatorKey: _rootNavigatorKey,
         path: '/about',
@@ -156,38 +182,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Main app tabs with bottom navigation
       StatefulShellRoute.indexedStack(
         parentNavigatorKey: _rootNavigatorKey,
-        builder: (_, _, navigationShell) {
+        builder: (context, _, navigationShell) {
           return Scaffold(
             body: navigationShell,
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: navigationShell.currentIndex,
-              onDestinationSelected: (i) => navigationShell.goBranch(
-                i,
-                initialLocation: i == navigationShell.currentIndex,
-              ),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home_outlined),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.build_outlined),
-                  selectedIcon: Icon(Icons.build_outlined),
-                  label: 'Repairs',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.calendar_today_outlined),
-                  selectedIcon: Icon(Icons.calendar_today_outlined),
-                  label: 'Appointments',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person_outline),
-                  label: 'Profile',
-                ),
-              ],
-            ),
+            bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+                ? null
+                : AppBottomNavigationBar(
+                    selectedIndex: navigationShell.currentIndex,
+                    onDestinationSelected: (i) => navigationShell.goBranch(
+                      i,
+                      initialLocation: i == navigationShell.currentIndex,
+                    ),
+                  ),
           );
         },
         branches: [
@@ -214,6 +220,24 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           StatefulShellBranch(
+            navigatorKey: _shellNavigatorAppliancesKey,
+            routes: [
+              GoRoute(
+                path: '/profile/appliances',
+                builder: (_, _) => const AppliancesScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: _shellNavigatorPaymentsKey,
+            routes: [
+              GoRoute(
+                path: '/profile/transactions',
+                builder: (_, _) => const TransactionHistoryScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
             navigatorKey: _shellNavigatorProfileKey,
             routes: [
               GoRoute(
@@ -229,3 +253,98 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(router.dispose);
   return router;
 });
+
+/// Keeps six destinations reachable without shrinking labels or tap targets.
+/// On compact screens the selected label spans the bar; every icon retains its
+/// native tooltip and screen-reader label. Roomier layouts show all labels.
+class AppBottomNavigationBar extends StatelessWidget {
+  const AppBottomNavigationBar({
+    super.key,
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  static const destinations = <NavigationDestination>[
+    NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+    NavigationDestination(icon: Icon(Icons.build_outlined), label: 'Repairs'),
+    NavigationDestination(
+      icon: Icon(Icons.calendar_today_outlined),
+      label: 'Appointments',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.devices_outlined),
+      label: 'Appliances',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.receipt_long_outlined),
+      label: 'Payments',
+    ),
+    NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+  ];
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final theme = Theme.of(context);
+      final labelStyle =
+          theme.navigationBarTheme.labelTextStyle?.resolve({
+            WidgetState.selected,
+          }) ??
+          theme.textTheme.labelMedium!;
+      final textScaler = MediaQuery.textScalerOf(context);
+      var destinationWidth = 48.0;
+      for (final destination in destinations) {
+        final painter = TextPainter(
+          text: TextSpan(text: destination.label, style: labelStyle),
+          textDirection: Directionality.of(context),
+          textScaler: textScaler,
+        )..layout();
+        final paddedWidth = painter.width + 24;
+        if (paddedWidth > destinationWidth) destinationWidth = paddedWidth;
+        painter.dispose();
+      }
+      final compact =
+          constraints.maxWidth < destinationWidth * destinations.length;
+      final navigationBar = NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: onDestinationSelected,
+        height: compact ? 64 : 80 + (textScaler.scale(12) - 12),
+        labelBehavior: compact
+            ? NavigationDestinationLabelBehavior.alwaysHide
+            : NavigationDestinationLabelBehavior.alwaysShow,
+        destinations: destinations,
+      );
+      final minimumWidth = destinations.length * 48.0;
+      return Material(
+        color: theme.colorScheme.surface,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (compact)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: ExcludeSemantics(
+                  child: Text(
+                    destinations[selectedIndex].label,
+                    key: const ValueKey('selected-navigation-label'),
+                    style: theme.textTheme.labelLarge,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            if (constraints.maxWidth < minimumWidth)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(width: minimumWidth, child: navigationBar),
+              )
+            else
+              navigationBar,
+          ],
+        ),
+      );
+    },
+  );
+}

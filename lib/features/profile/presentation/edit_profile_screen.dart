@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/utils/account_errors.dart';
+import '../../../core/validation/customer_identity.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
@@ -28,6 +30,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   late final _fieldFocus = <TextEditingController, FocusNode>{
     _firstNameController: FocusNode(),
     _lastNameController: FocusNode(),
+    _emailController: FocusNode(),
+    _phoneController: FocusNode(),
     _addressController: FocusNode(),
   };
   Customer? _customer;
@@ -111,10 +115,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       final updated = Customer(
         id: _customer!.id,
         authId: _customer!.authId,
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
-        email: _emailController.text.trim(),
-        phoneNo: _phoneController.text.trim(),
+        firstName: CustomerIdentity.normalizeName(_firstNameController.text),
+        lastName: CustomerIdentity.normalizeName(_lastNameController.text),
+        email: CustomerIdentity.normalizeEmail(_emailController.text),
+        phoneNo: CustomerIdentity.normalizeOptionalPhone(_phoneController.text),
         address: _addressController.text.trim(),
         profilePicture: _customer!.profilePicture,
         createdAt: _customer!.createdAt,
@@ -133,11 +137,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       } else {
         context.go('/profile');
       }
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Couldn’t save your details. Please try again.'),
+        SnackBar(
+          content: Text(
+            friendlyAccountError(
+              error,
+              fallback: 'Could not save your details. Please try again.',
+            ),
+          ),
         ),
       );
     } finally {
@@ -244,10 +253,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                                 AutofillHints.givenName,
                                               ],
                                               validator: (value) =>
-                                                  value == null ||
-                                                      value.trim().isEmpty
-                                                  ? 'Enter your first name'
-                                                  : null,
+                                                  CustomerIdentity.validateName(
+                                                    value,
+                                                    fieldName: 'first name',
+                                                  ),
                                             );
                                             final last = AppTextField(
                                               label: 'Last name',
@@ -264,10 +273,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                                 AutofillHints.familyName,
                                               ],
                                               validator: (value) =>
-                                                  value == null ||
-                                                      value.trim().isEmpty
-                                                  ? 'Enter your last name'
-                                                  : null,
+                                                  CustomerIdentity.validateName(
+                                                    value,
+                                                    fieldName: 'last name',
+                                                  ),
                                             );
                                             if (constraints.maxWidth < 420) {
                                               return Column(
@@ -299,6 +308,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                           hint: 'Email address',
                                           helperText: 'Updating this contact email does not change your sign-in email.',
                                           controller: _emailController,
+                                          focusNode:
+                                              _fieldFocus[_emailController],
+                                          validator: (value) =>
+                                              CustomerIdentity.validateEmail(
+                                                value,
+                                                required: false,
+                                              ),
                                           enabled: !_isSaving,
                                           keyboardType:
                                               TextInputType.emailAddress,
@@ -316,6 +332,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                           label: 'Phone number (optional)',
                                           hint: 'e.g. 0917 123 4567',
                                           controller: _phoneController,
+                                          focusNode:
+                                              _fieldFocus[_phoneController],
+                                          validator: CustomerIdentity
+                                              .validateOptionalPhone,
                                           enabled: !_isSaving,
                                           keyboardType: TextInputType.phone,
                                           textInputAction: TextInputAction.next,

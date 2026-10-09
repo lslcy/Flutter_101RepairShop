@@ -10,6 +10,7 @@ import 'package:flutter_101repairshop/core/router/app_router.dart';
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
 import 'package:flutter_101repairshop/core/widgets/app_button.dart';
 import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
+import 'package:flutter_101repairshop/core/widgets/password_requirements.dart';
 import 'package:flutter_101repairshop/features/auth/data/auth_flow_controller.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/reset_password_screen.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/forgot_password_screen.dart';
@@ -169,8 +170,8 @@ void main() {
   }
 
   Future<void> enterValidPasswords(WidgetTester tester) async {
-    await enterPassword(tester, 'New password', 'eight888');
-    await enterPassword(tester, 'Confirm password', 'eight888');
+    await enterPassword(tester, 'New password', 'Eight888!');
+    await enterPassword(tester, 'Confirm password', 'Eight888!');
   }
 
   for (final dark in [false, true]) {
@@ -179,6 +180,8 @@ void main() {
       (tester) async {
         await pumpForm(tester, _FakeFlow(), dark: dark);
         expect(find.byType(TextFormField), findsNWidgets(2));
+        expect(find.text('At least 8 characters'), findsNothing);
+        await tapVisible(tester, field('New password'));
         expect(find.text('At least 8 characters'), findsOneWidget);
         await tapVisible(tester, find.byTooltip('Show password'));
         await tester.drag(
@@ -237,11 +240,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(TextFormField), findsNWidgets(2));
     expect(find.text('This link is no longer valid'), findsNothing);
-    expect(find.text('At least 8 characters'), findsOneWidget);
+    expect(find.text('At least 8 characters'), findsNothing);
     expect(tester.takeException(), isNull);
   });
   testWidgets(
-    'reset focuses the first error and requires eight matching characters',
+    'reset focuses the first error and requires matching valid passwords',
     (tester) async {
       final flow = _FakeFlow();
       await pumpForm(tester, flow);
@@ -269,7 +272,7 @@ void main() {
         isTrue,
       );
 
-      await enterPassword(tester, 'New password', 'eight888');
+      await enterPassword(tester, 'New password', 'Eight888!');
       await enterPassword(tester, 'Confirm password', 'different');
       await tapVisible(tester, saveButton());
       expect(find.text('Use at least 8 characters'), findsNothing);
@@ -282,12 +285,132 @@ void main() {
         isTrue,
       );
       expect(flow.submittedPasswords, isEmpty);
-      await enterPassword(tester, 'Confirm password', 'eight888');
+      await enterPassword(tester, 'Confirm password', 'Eight888!');
       expect(find.text('Passwords match'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
 
+  testWidgets('reset rejects a matching password with an unmet requirement', (
+    tester,
+  ) async {
+    final flow = _FakeFlow();
+    await pumpForm(tester, flow);
+    await enterPassword(tester, 'New password', 'Eight888');
+    await enterPassword(tester, 'Confirm password', 'Eight888');
+    await tapVisible(tester, saveButton());
+    expect(flow.submittedPasswords, isEmpty);
+    expect(find.text('Passwords match'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('password_requirement_special')),
+        matching: find.byIcon(Icons.cancel_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<EditableText>(editable('New password')).focusNode.hasFocus,
+      isTrue,
+    );
+
+    await enterPassword(tester, 'New password', 'Eight888!');
+    await enterPassword(tester, 'Confirm password', 'Eight888!');
+    expect(find.text('Passwords match'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'reset checklist follows focus, valid input, edits and autofill',
+    (tester) async {
+      final flow = _FakeFlow();
+      await pumpForm(tester, flow, dark: true);
+      final rules = ['length', 'special', 'uppercase', 'number'];
+      void expectChecklistHidden() {
+        for (final rule in rules) {
+          expect(
+            find.byKey(ValueKey('password_requirement_$rule')),
+            findsNothing,
+          );
+        }
+      }
+
+      void expectNeutralChecklist() {
+        for (final rule in rules) {
+          expect(
+            find.descendant(
+              of: find.byKey(ValueKey('password_requirement_$rule')),
+              matching: find.byIcon(Icons.info_outline),
+            ),
+            findsOneWidget,
+          );
+        }
+      }
+
+      expectChecklistHidden();
+      await tapVisible(tester, field('New password'));
+      expect(
+        tester
+            .widget<EditableText>(editable('New password'))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      expectNeutralChecklist();
+      await tapVisible(tester, field('Confirm password'));
+      expectChecklistHidden();
+      await tapVisible(tester, field('New password'));
+      expectNeutralChecklist();
+      await enterPassword(tester, 'New password', 'Complete1!');
+      expectChecklistHidden();
+      expect(
+        tester
+            .widget<EditableText>(editable('New password'))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      await enterPassword(tester, 'New password', 'Complete1');
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('password_requirement_special')),
+          matching: find.byIcon(Icons.cancel_outlined),
+        ),
+        findsOneWidget,
+      );
+      await tapVisible(tester, field('Confirm password'));
+      expect(find.text('At least 1 special character'), findsOneWidget);
+
+      // Password managers update the controller without invoking onChanged.
+      final controller = tester
+          .widget<EditableText>(editable('New password'))
+          .controller;
+      controller.text = 'Complete1!';
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<PasswordRequirements>(find.byType(PasswordRequirements))
+            .password,
+        'Complete1!',
+      );
+      expectChecklistHidden();
+      await tapVisible(tester, field('New password'));
+      expectChecklistHidden();
+      controller.clear();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<PasswordRequirements>(find.byType(PasswordRequirements))
+            .password,
+        isEmpty,
+      );
+      expectNeutralChecklist();
+      await tapVisible(tester, field('Confirm password'));
+      expectChecklistHidden();
+      expect(find.text('Passwords match'), findsNothing);
+      expect(flow.submittedPasswords, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'reset password visibility preserves entered spaces and characters',
     (tester) async {
@@ -329,7 +452,7 @@ void main() {
       await tapVisible(tester, saveButton());
       queuedSubmit();
       await tester.pumpAndSettle();
-      expect(flow.submittedPasswords, ['eight888']);
+      expect(flow.submittedPasswords, ['Eight888!']);
       expect(find.text('Password updated'), findsNothing);
       expect(find.text('Saving password...'), findsOneWidget);
       expect(
@@ -387,17 +510,17 @@ void main() {
       expect(find.text('Password updated'), findsNothing);
       expect(
         tester.widget<EditableText>(editable('New password')).controller.text,
-        'eight888',
+        'Eight888!',
       );
       expect(
         tester
             .widget<EditableText>(editable('Confirm password'))
             .controller
             .text,
-        'eight888',
+        'Eight888!',
       );
       await tapVisible(tester, saveButton());
-      expect(flow.submittedPasswords, ['eight888', 'eight888']);
+      expect(flow.submittedPasswords, ['Eight888!', 'Eight888!']);
       flow.pendingUpdate!.complete();
       await tester.pumpAndSettle();
       expect(find.text('Password updated'), findsOneWidget);

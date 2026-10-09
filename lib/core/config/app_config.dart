@@ -1,10 +1,12 @@
-// Build-time configuration shared with the Laravel web admin.
+// Shared service URLs and build-time Laravel configuration.
 //
 // Provide values with `--dart-define`, for example:
 //   flutter run --dart-define=LARAVEL_BASE_URL=https://admin.101repairshop.com
 // or keep them in a JSON file and use `--dart-define-from-file=config.json`.
 class AppConfig {
   AppConfig._();
+
+  static const supabaseUrl = 'https://oyzaakhgbrgsspuasrcb.supabase.co';
 
   /// Root URL of the Laravel web admin (no trailing slash required).
   /// Used to resolve files uploaded from the web admin, such as

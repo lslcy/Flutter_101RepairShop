@@ -292,8 +292,8 @@ void main() {
       await fill('First name', 'Alex');
       await fill('Last name', 'Reyes');
       await fill('Email address', 'alex@example.com');
-      await fill('Password', 'secret123');
-      await fill('Confirm password', 'secret123');
+      await fill('Password', 'Secret1!23');
+      await fill('Confirm password', 'Secret1!23');
       await tapVisible(
         tester,
         find.widgetWithText(AppButton, 'Create account'),

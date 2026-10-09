@@ -8,11 +8,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_101repairshop/core/constants/app_constants.dart';
+import 'package:flutter_101repairshop/core/services/notification_service.dart';
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
+import 'package:flutter_101repairshop/core/widgets/app_button.dart';
+import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
 import 'package:flutter_101repairshop/features/appointments/data/appointments_repository.dart';
 import 'package:flutter_101repairshop/features/appointments/presentation/book_appointment_screen.dart';
 import 'package:flutter_101repairshop/features/profile/data/customer_repository.dart';
 import 'package:flutter_101repairshop/features/shared/models/customer.dart';
+import 'package:flutter_101repairshop/features/shared/models/appliance.dart';
 
 const _longAddress =
     'Unit 1204, Building Three, 123 Mabini Street, Barangay San Antonio, '
@@ -32,10 +36,23 @@ class _Customers extends CustomerRepository {
             address: _longAddress,
           );
 
+  final appliances = <Appliance>[
+    Appliance(
+      id: 1,
+      customerId: 'customer',
+      brand: 'Samsung',
+      product: 'split-type AC',
+      modelNo: 'AR12',
+      serialNo: 'SN12345',
+    ),
+  ];
   Customer customer;
   bool fail = false;
   int loadCount = 0;
   Completer<void>? pending;
+
+  @override
+  Future<List<Appliance>> getAppliances() async => appliances;
 
   @override
   Future<Customer?> getCurrentCustomer() async {
@@ -48,14 +65,43 @@ class _Customers extends CustomerRepository {
 
 class _Appointments extends AppointmentsRepository {
   final bookings = <Map<String, dynamic>>[];
+  int? insertedId;
   Object? error;
   Completer<void>? pending;
 
   @override
-  Future<void> bookAppointment(Map<String, dynamic> appointmentData) async {
+  Future<int?> bookAppointment(Map<String, dynamic> appointmentData) async {
     if (error != null) throw error!;
     bookings.add(Map<String, dynamic>.from(appointmentData));
     await pending?.future;
+    return insertedId;
+  }
+}
+
+class _Reminders extends NotificationService {
+  bool allowed = true;
+  int permissionRequests = 0;
+  ReminderScheduleResult result = ReminderScheduleResult.scheduled;
+  final scheduledIds = <int>[];
+  final scheduledMinutes = <int>[];
+
+  @override
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    return allowed;
+  }
+
+  @override
+  Future<ReminderScheduleResult> scheduleAppointmentReminder({
+    required int appointmentId,
+    required String title,
+    required DateTime appointmentDate,
+    String? timeSlot,
+    required int reminderMinutes,
+  }) async {
+    scheduledIds.add(appointmentId);
+    scheduledMinutes.add(reminderMinutes);
+    return result;
   }
 }
 
@@ -83,6 +129,7 @@ void main() {
     double textScale = 1,
     bool dark = false,
     bool settle = true,
+    _Reminders? reminders,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -126,6 +173,9 @@ void main() {
       ProviderScope(
         overrides: [
           customerRepositoryProvider.overrideWithValue(customers),
+          notificationServiceProvider.overrideWithValue(
+            reminders ?? _Reminders(),
+          ),
           appointmentsRepositoryProvider.overrideWithValue(appointments),
         ],
         child: MaterialApp.router(
@@ -142,9 +192,24 @@ void main() {
     if (settle) await tester.pumpAndSettle();
   }
 
+  Finder field(String label) => find.descendant(
+    of: find.widgetWithText(AppTextField, label),
+    matching: find.byType(TextFormField),
+  );
+
+  Finder bookButton() => find.byWidgetPredicate(
+    (widget) => widget is AppButton && widget.label == 'Book appointment',
+  );
+
+  Finder bookElevatedButton() =>
+      find.descendant(of: bookButton(), matching: find.byType(ElevatedButton));
+
   Future<void> tapVisible(WidgetTester tester, Finder finder) async {
-    await tester.ensureVisible(finder);
+    FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pumpAndSettle();
+    expect(finder.hitTestable(), findsOneWidget);
     await tester.tap(finder);
     await tester.pumpAndSettle();
   }
@@ -161,14 +226,108 @@ void main() {
 
   Future<void> chooseTime(WidgetTester tester) async {
     final dropdown = find.byType(DropdownButton<String>);
-    await Scrollable.ensureVisible(tester.element(dropdown), alignment: 0.5);
-    await tester.pumpAndSettle();
-    await tester.tap(dropdown);
-    await tester.pumpAndSettle();
+    await tapVisible(tester, dropdown);
     await tester.tap(find.text(AppConstants.timeSlots.first).last);
     await tester.pumpAndSettle();
   }
 
+  Future<void> chooseReminder(WidgetTester tester, String label) async {
+    await tapVisible(tester, find.byType(DropdownButton<int>).last);
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'chosen leadtime is saved and schedules one reminder after booking',
+    (tester) async {
+      final appointments = _Appointments()..insertedId = 77;
+      final reminders = _Reminders();
+      await pumpBooking(
+        tester,
+        _Customers(),
+        appointments,
+        reminders: reminders,
+      );
+      expect(reminders.permissionRequests, 0);
+      await tester.enterText(field('What needs fixing?'), 'Fan repair');
+      await chooseDate(tester);
+      await chooseTime(tester);
+      await chooseReminder(tester, '15 minutes before');
+      expect(reminders.permissionRequests, 1);
+      await tapVisible(tester, bookButton());
+      expect(appointments.bookings.single['reminder_minutes'], 15);
+      expect(reminders.scheduledIds, [77]);
+      expect(reminders.scheduledMinutes, [15]);
+      expect(find.text('Appointments test destination'), findsOneWidget);
+    },
+  );
+
+  testWidgets('No reminder clears a previously selected reminder', (
+    tester,
+  ) async {
+    final appointments = _Appointments()..insertedId = 77;
+    final reminders = _Reminders();
+    await pumpBooking(tester, _Customers(), appointments, reminders: reminders);
+    await chooseReminder(tester, '15 minutes before');
+    await chooseReminder(tester, 'No reminder');
+    await tester.enterText(field('What needs fixing?'), 'Fan repair');
+    await chooseDate(tester);
+    await chooseTime(tester);
+    await tapVisible(tester, bookButton());
+    expect(appointments.bookings.single['reminder_minutes'], isNull);
+    expect(reminders.scheduledIds, isEmpty);
+    expect(reminders.permissionRequests, 1);
+  });
+
+  testWidgets(
+    'denied notification permission keeps the preference and allows booking',
+    (tester) async {
+      final appointments = _Appointments()..insertedId = 77;
+      final reminders = _Reminders()..allowed = false;
+      await pumpBooking(
+        tester,
+        _Customers(),
+        appointments,
+        reminders: reminders,
+      );
+      await chooseReminder(tester, '10 minutes before');
+      expect(
+        find.text(
+          'Your choice will be saved. Allow notifications in phone settings to receive reminders.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
+        isNotNull,
+      );
+      await tester.enterText(field('What needs fixing?'), 'Fan repair');
+      await chooseDate(tester);
+      await chooseTime(tester);
+      await tapVisible(tester, bookButton());
+      expect(appointments.bookings.single['reminder_minutes'], 10);
+      expect(find.text('Appointments test destination'), findsOneWidget);
+    },
+  );
+
+  testWidgets('a device reminder failure never invites a duplicate booking', (
+    tester,
+  ) async {
+    final appointments = _Appointments()..insertedId = 77;
+    final reminders = _Reminders()..result = ReminderScheduleResult.failed;
+    await pumpBooking(tester, _Customers(), appointments, reminders: reminders);
+    await tester.enterText(field('What needs fixing?'), 'Fan repair');
+    await chooseDate(tester);
+    await chooseTime(tester);
+    await chooseReminder(tester, '5 minutes before');
+    await tapVisible(tester, bookButton());
+    expect(appointments.bookings, hasLength(1));
+    expect(find.text('Appointments test destination'), findsOneWidget);
+    expect(
+      find.text('We couldn’t book your appointment. Please try again.'),
+      findsNothing,
+    );
+  });
   testWidgets(
     'Booking fits 320px dark mode with large text and a long saved address',
     (tester) async {
@@ -186,7 +345,7 @@ void main() {
       await tester.ensureVisible(find.text(_longAddress));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.text('Book appointment'));
+      await tester.ensureVisible(bookButton());
       await tester.pumpAndSettle();
       expect(find.text('Edit contact details'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -201,7 +360,7 @@ void main() {
     expect(find.text('We couldn’t load your contact details.'), findsOneWidget);
     expect(find.text(_longAddress), findsNothing);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNull,
     );
 
@@ -210,7 +369,7 @@ void main() {
 
     expect(customers.loadCount, 2);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNotNull,
     );
     expect(find.text('We couldn’t load your contact details.'), findsNothing);
@@ -223,7 +382,7 @@ void main() {
   ) async {
     final appointments = _Appointments();
     await pumpBooking(tester, _Customers(), appointments);
-    await tapVisible(tester, find.text('Book appointment'));
+    await tapVisible(tester, bookButton());
     expect(find.text('Describe what needs fixing.'), findsOneWidget);
     expect(find.text('Choose a preferred date.'), findsOneWidget);
     expect(find.text('Choose a preferred time.'), findsOneWidget);
@@ -240,13 +399,10 @@ void main() {
       isTrue,
     );
 
-    await tester.ensureVisible(find.byType(TextFormField).at(0));
-    await tester.enterText(
-      find.byType(TextFormField).at(0),
-      'Fan will not spin',
-    );
+    await tester.ensureVisible(field('What needs fixing?'));
+    await tester.enterText(field('What needs fixing?'), 'Fan will not spin');
     await chooseDate(tester);
-    await tapVisible(tester, find.text('Book appointment'));
+    await tapVisible(tester, bookButton());
 
     expect(find.text('Describe what needs fixing.'), findsNothing);
     expect(find.text('Choose a preferred date.'), findsNothing);
@@ -265,37 +421,38 @@ void main() {
       expect(find.text(_longAddress), findsOneWidget);
 
       await tester.enterText(
-        find.byType(TextFormField).at(0),
+        field('What needs fixing?'),
         '  Air conditioner is leaking  ',
       );
-      await tester.ensureVisible(find.byType(TextFormField).at(1));
-      await tester.enterText(
-        find.byType(TextFormField).at(1),
-        '  Samsung split-type AC  ',
+      // The saved appliance supplies the booking label, including model and serial.
+      expect(
+        customers.appliances.single.bookingLabel,
+        'Samsung split-type AC (Model AR12, S/N SN12345)',
       );
       final pickedDate = await chooseDate(tester);
       await chooseTime(tester);
-      await tester.ensureVisible(find.byType(TextFormField).at(2));
+      await tester.ensureVisible(field('Anything else? (optional)'));
       await tester.enterText(
-        find.byType(TextFormField).at(2),
+        field('Anything else? (optional)'),
         '  Water drips after ten minutes.  ',
       );
-      await tester.ensureVisible(find.text('Book appointment'));
+      await tester.ensureVisible(bookButton());
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Book appointment'));
+      await tester.tap(bookButton());
       await tester.pump();
 
       expect(appointments.bookings, hasLength(1));
       expect(
-        tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+        tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
         isNull,
       );
       expect(appointments.bookings.single, {
         'title': 'Air conditioner is leaking',
-        'appliance_name': 'Samsung split-type AC',
+        'appliance_name': customers.appliances.single.bookingLabel,
         'appointment_date': pickedDate.toIso8601String().split('T').first,
         'time_slot': AppConstants.timeSlots.first,
         'notes': 'Water drips after ten minutes.',
+        'reminder_minutes': null,
         'status': 'Pending',
       });
 
@@ -317,7 +474,7 @@ void main() {
 
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNull,
     );
     expect(appointments.bookings, isEmpty);
@@ -325,7 +482,7 @@ void main() {
     customers.pending!.complete();
     await tester.pumpAndSettle();
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNotNull,
     );
     expect(tester.takeException(), isNull);
@@ -346,13 +503,13 @@ void main() {
       expect(find.text('No address added yet'), findsOneWidget);
       expect(find.text('Add address'), findsOneWidget);
 
-      await tester.enterText(find.byType(TextFormField).first, 'Broken fan');
+      await tester.enterText(field('What needs fixing?'), 'Broken fan');
       await chooseDate(tester);
       await chooseTime(tester);
-      await tapVisible(tester, find.text('Book appointment'));
+      await tapVisible(tester, bookButton());
 
       expect(
-        tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+        tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
         isNull,
       );
       expect(appointments.bookings, isEmpty);
@@ -368,18 +525,18 @@ void main() {
     final appointments = _Appointments()
       ..error = AppointmentAddressRequiredException();
     await pumpBooking(tester, customers, appointments);
-    await tester.enterText(find.byType(TextFormField).first, 'Broken fan');
+    await tester.enterText(field('What needs fixing?'), 'Broken fan');
     await chooseDate(tester);
     await chooseTime(tester);
 
     // Another device clears the persisted address after this screen loaded it.
     customers.customer = Customer(id: 'customer', address: '  ');
-    await tapVisible(tester, find.text('Book appointment'));
+    await tapVisible(tester, bookButton());
 
     expect(customers.loadCount, 2);
     expect(find.text('Add address'), findsOneWidget);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNull,
     );
     expect(appointments.bookings, isEmpty);
@@ -393,7 +550,7 @@ void main() {
       customer: Customer(id: 'customer', firstName: 'Alex'),
     );
     await pumpBooking(tester, customers, _Appointments());
-    await tester.enterText(find.byType(TextFormField).first, 'Broken fan');
+    await tester.enterText(field('What needs fixing?'), 'Broken fan');
     await chooseDate(tester);
     await chooseTime(tester);
     await tapVisible(tester, find.text('Add address'));
@@ -404,7 +561,7 @@ void main() {
 
     expect(customers.loadCount, 2);
     expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      tester.widget<ElevatedButton>(bookElevatedButton()).onPressed,
       isNotNull,
     );
     expect(find.text(_updatedAddress), findsOneWidget);
@@ -425,15 +582,15 @@ void main() {
     final appointments = _Appointments()
       ..error = StateError('Service is offline. Try again.');
     await pumpBooking(tester, _Customers(), appointments);
-    await tester.enterText(find.byType(TextFormField).first, 'Broken fan');
+    await tester.enterText(field('What needs fixing?'), 'Broken fan');
     await chooseDate(tester);
     await chooseTime(tester);
-    await tester.ensureVisible(find.byType(TextFormField).at(2));
+    await tester.ensureVisible(field('Anything else? (optional)'));
     await tester.enterText(
-      find.byType(TextFormField).at(2),
+      field('Anything else? (optional)'),
       'Makes a loud sound',
     );
-    await tapVisible(tester, find.text('Book appointment'));
+    await tapVisible(tester, bookButton());
 
     expect(find.text('Service is offline. Try again.'), findsOneWidget);
     expect(find.text('Appointments test destination'), findsNothing);
@@ -446,7 +603,7 @@ void main() {
     );
     expect(
       tester
-          .widget<TextFormField>(find.byType(TextFormField).at(2))
+          .widget<TextFormField>(field('Anything else? (optional)'))
           .controller
           ?.text,
       'Makes a loud sound',
@@ -455,7 +612,7 @@ void main() {
     expect(find.text('Select a time slot'), findsNothing);
 
     appointments.error = null;
-    await tapVisible(tester, find.text('Book appointment'));
+    await tapVisible(tester, bookButton());
     expect(appointments.bookings, hasLength(1));
     expect(appointments.bookings.single['notes'], 'Makes a loud sound');
     expect(find.text('Appointments test destination'), findsOneWidget);

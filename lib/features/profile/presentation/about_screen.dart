@@ -82,7 +82,7 @@ class AboutScreen extends StatelessWidget {
                     context,
                     Icons.location_on_outlined,
                     'Address',
-                    'Quezon City, Philippines',
+                    'Tagum City, Philippines',
                   ),
                 ],
               ),

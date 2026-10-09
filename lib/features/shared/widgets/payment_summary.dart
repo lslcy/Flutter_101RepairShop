@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/app_dates.dart';
 import '../models/transaction.dart' as models;
+import '../../payments/presentation/customer_payment_screen.dart';
 
 /// Peso amount, or a friendly placeholder when Laravel has not set it.
 String formatPeso(double? amount, {String fallback = 'Not available'}) =>
@@ -77,7 +78,7 @@ class PaymentSummary extends StatelessWidget {
         PaymentRow(
           icon: Icons.credit_card_outlined,
           label: 'Payment method',
-          value: t.paymentMethod ?? '—',
+          value: t.displayedPaymentMethod ?? '—',
         ),
         if (t.referenceNo != null)
           PaymentRow(
@@ -106,7 +107,11 @@ class PaymentSummary extends StatelessWidget {
             label: 'Received by',
             value: t.receivedBy!,
           ),
-        if (t.canPayOnline) ...[
+        if (!t.isPaid) ...[
+          const SizedBox(height: AppSpacing.sm),
+          CustomerPaymentButton(transaction: t),
+        ],
+        if (t.canPayOnline && !(t.customerPayment?.isPending ?? false)) ...[
           const SizedBox(height: AppSpacing.xs),
           PayOnlineButton(url: t.paymentUrl!),
           const SizedBox(height: AppSpacing.md),
@@ -208,6 +213,40 @@ class PayOnlineButton extends StatelessWidget {
       style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
       icon: const Icon(Icons.open_in_new_outlined),
       label: const Text('Pay online'),
+    );
+  }
+}
+
+/// Opens the customer flow without granting access to financial record updates.
+class CustomerPaymentButton extends StatelessWidget {
+  const CustomerPaymentButton({super.key, required this.transaction});
+  final models.Transaction transaction;
+
+  @override
+  Widget build(BuildContext context) {
+    if (transaction.isPaid) return const SizedBox.shrink();
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+      onPressed: () {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        // Details capture one transaction; close that sheet before refreshing it.
+        if (ModalRoute.of(context) is PopupRoute) Navigator.of(context).pop();
+        navigator.push<void>(
+          MaterialPageRoute(
+            builder: (_) => CustomerPaymentScreen(transaction: transaction),
+          ),
+        );
+      },
+      icon: Icon(
+        (transaction.customerPayment?.isPending ?? false)
+            ? Icons.hourglass_top_outlined
+            : Icons.payments_outlined,
+      ),
+      label: Text(
+        (transaction.customerPayment?.isPending ?? false)
+            ? 'View payment status'
+            : 'Choose payment method',
+      ),
     );
   }
 }

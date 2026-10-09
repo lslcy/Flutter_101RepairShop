@@ -96,7 +96,12 @@ void main() {
     server.silentlyRejectPatch = true;
     await expectLater(
       repository.updateProfile(
-        Customer(id: 'customer-1', address: 'New address'),
+        Customer(
+          id: 'customer-1',
+          firstName: 'Alex',
+          lastName: 'Reyes',
+          address: 'New address',
+        ),
       ),
       throwsA(isA<StateError>()),
     );
@@ -152,6 +157,8 @@ void main() {
       await repository.updateProfile(
         Customer(
           id: 'customer-1',
+          firstName: 'Alex',
+          lastName: 'Reyes',
           address: '  10 Rizal Street\nDavao City 8000  ',
         ),
       );

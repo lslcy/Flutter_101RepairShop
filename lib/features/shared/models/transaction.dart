@@ -1,5 +1,6 @@
 import '../../../core/constants/statuses.dart';
 import '../../../core/utils/app_dates.dart';
+import 'payment_submission.dart';
 
 double? _toDouble(Object? value) {
   if (value == null) return null;
@@ -21,6 +22,7 @@ class Transaction {
   final double? laborTotal;
   final double? totalAmount;
   final String? paymentStatus;
+  final PaymentSubmission? customerPayment;
   final String? paymentMethod;
   final DateTime? paidAt;
 
@@ -46,6 +48,7 @@ class Transaction {
     this.laborTotal,
     this.totalAmount,
     this.paymentStatus,
+    this.customerPayment,
     this.paymentMethod,
     this.paidAt,
     this.paymentDate,
@@ -81,11 +84,44 @@ class Transaction {
     );
   }
 
-  /// `Paid`, `Unpaid` or `Partial` (legacy `Pending` reads as Unpaid).
-  String get status => PaymentStatus.normalize(paymentStatus);
+  /// A receipt under review displays Pending without recording money as paid.
+  String get status => !isPaid && (customerPayment?.isPending ?? false)
+      ? 'Pending'
+      : PaymentStatus.normalize(paymentStatus);
 
-  bool get isPaid => status == PaymentStatus.paid;
-  bool get isPartial => status == PaymentStatus.partial;
+  bool get isPaid =>
+      PaymentStatus.normalize(paymentStatus) == PaymentStatus.paid;
+  bool get isPartial =>
+      PaymentStatus.normalize(paymentStatus) == PaymentStatus.partial;
+
+  String? get displayedPaymentMethod {
+    if (!isPaid && (customerPayment?.isPending ?? false)) return 'GCash';
+    if (!isPaid && (customerPayment?.isPayAtShop ?? false)) {
+      return 'Pay at the shop';
+    }
+    return paymentMethod;
+  }
+
+  Transaction withCustomerPayment(PaymentSubmission? submission) => Transaction(
+    id: id,
+    customerId: customerId,
+    reportId: reportId,
+    partsTotal: partsTotal,
+    laborTotal: laborTotal,
+    totalAmount: totalAmount,
+    paymentStatus: paymentStatus,
+    customerPayment: submission,
+    paymentMethod: paymentMethod,
+    paidAt: paidAt,
+    paymentDate: paymentDate,
+    paymentDue: paymentDue,
+    partialPaymentAmount: partialPaymentAmount,
+    referenceNo: referenceNo,
+    paymentUrl: paymentUrl,
+    receivedBy: receivedBy,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+  );
 
   /// Amount already received.
   double? get amountPaid {

@@ -15,6 +15,7 @@ import '../../shared/models/service_details.dart';
 import '../../shared/models/service_report.dart';
 import '../../shared/widgets/payment_summary.dart';
 import '../data/repairs_repository.dart';
+import '../../payments/data/payment_submission_repository.dart';
 
 class RepairDetailScreen extends ConsumerStatefulWidget {
   final int reportId;
@@ -87,6 +88,9 @@ class _RepairDetailScreenState extends ConsumerState<RepairDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(paymentUpdatesProvider, (_, _) {
+      if (mounted) _loadReport();
+    });
     return Scaffold(
       appBar: AppBar(title: const Text('Repair details')),
       body: SafeArea(

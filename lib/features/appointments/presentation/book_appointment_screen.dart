@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/notification_service.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/app_dates.dart';
+import '../../../core/utils/appointment_reminder_time.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
@@ -28,14 +30,19 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   final _applianceFieldKey = GlobalKey();
   final _dateFieldKey = GlobalKey<FormFieldState<DateTime>>();
   final _timeFieldKey = GlobalKey<FormFieldState<String>>();
+  final _reminderFieldKey = GlobalKey<FormFieldState<int>>();
   final _titleFocus = FocusNode();
   final _applianceFocus = FocusNode();
   final _dateFocus = FocusNode();
   final _timeFocus = FocusNode();
+  final _reminderFocus = FocusNode();
   final _titleController = TextEditingController();
   final _notesController = TextEditingController();
   DateTime? _selectedDate;
   String? _selectedTimeSlot;
+  int? _selectedReminderMinutes;
+  bool _checkingReminderPermission = false;
+  bool _reminderPermissionDenied = false;
   Customer? _customer;
   List<Appliance> _appliances = [];
   Appliance? _selectedAppliance;
@@ -49,7 +56,8 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   bool get _hasAppliances =>
       !_isLoadingAppliances && !_appliancesLoadFailed && _appliances.isNotEmpty;
 
-  bool get _canBook => _hasRequiredAddress && _hasAppliances;
+  bool get _canBook =>
+      _hasRequiredAddress && _hasAppliances && !_checkingReminderPermission;
 
   bool get _hasRequiredAddress =>
       !_isLoadingCustomer &&
@@ -71,6 +79,7 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     _applianceFocus.dispose();
     _dateFocus.dispose();
     _timeFocus.dispose();
+    _reminderFocus.dispose();
     super.dispose();
   }
 
@@ -168,19 +177,46 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
       _bookingError = null;
     });
     try {
-      await ref.read(appointmentsRepositoryProvider).bookAppointment({
-        'title': _titleController.text.trim(),
-        // Filled from the chosen saved appliance (brand, product, model, S/N).
-        'appliance_name': _selectedAppliance!.bookingLabel,
-        'appointment_date': AppDates.toDateString(_selectedDate!),
-        'time_slot': _selectedTimeSlot,
-        'notes': _notesController.text.trim(),
-        'status': 'Pending',
-      });
+      final insertedId = await ref
+          .read(appointmentsRepositoryProvider)
+          .bookAppointment({
+            'title': _titleController.text.trim(),
+            // Filled from the chosen saved appliance (brand, product, model, S/N).
+            'appliance_name': _selectedAppliance!.bookingLabel,
+            'appointment_date': AppDates.toDateString(_selectedDate!),
+            'time_slot': _selectedTimeSlot,
+            'notes': _notesController.text.trim(),
+            'reminder_minutes': _selectedReminderMinutes,
+            'status': 'Pending',
+          });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Appointment booked. Status: pending.')),
-      );
+
+      // Device delivery cannot turn an already saved booking into a failed one.
+      var message = 'Appointment booked. Status: pending.';
+      if (_selectedReminderMinutes != null) {
+        final result = insertedId == null
+            ? ReminderScheduleResult.failed
+            : await ref
+                  .read(notificationServiceProvider)
+                  .scheduleAppointmentReminder(
+                    appointmentId: insertedId,
+                    title: _titleController.text.trim(),
+                    appointmentDate: _selectedDate!,
+                    timeSlot: _selectedTimeSlot,
+                    reminderMinutes: _selectedReminderMinutes!,
+                  );
+        message = switch (result) {
+          ReminderScheduleResult.scheduled =>
+            'Appointment booked. Your reminder is set.',
+          ReminderScheduleResult.tooLate => 'Appointment booked. The selected reminder time has already passed.',
+          ReminderScheduleResult.unavailable => 'Appointment booked. Allow notifications in your phone settings to receive your reminder.',
+          _ => 'Appointment booked. We could not set the device reminder. Reopen the app to retry.',
+        };
+      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
       if (context.canPop()) {
         context.pop();
       } else {
@@ -213,6 +249,9 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     } else if (_dateFieldKey.currentState?.hasError ?? false) {
       fieldKey = _dateFieldKey;
       focusNode = _dateFocus;
+    } else if (_reminderFieldKey.currentState?.hasError ?? false) {
+      fieldKey = _reminderFieldKey;
+      focusNode = _reminderFocus;
     } else {
       fieldKey = _timeFieldKey;
       focusNode = _timeFocus;
@@ -277,8 +316,7 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                     _section(
                       number: '1',
                       title: 'Repair details',
-                      description:
-                          'Pick an appliance from My Appliances and tell us what is wrong.',
+                      description: 'Pick an appliance from My Appliances and tell us what is wrong.',
                       children: [
                         _applianceField(),
                         const SizedBox(height: AppSpacing.md),
@@ -307,6 +345,8 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                         _dateField(),
                         const SizedBox(height: AppSpacing.lg),
                         _timeField(),
+                        const SizedBox(height: AppSpacing.lg),
+                        _reminderField(),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.md),
@@ -361,6 +401,21 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
                           Icons.schedule_outlined,
                           'Preferred time',
                           _selectedTimeSlot ?? 'Choose a time above',
+                        ),
+                        _summaryRow(
+                          Icons.notifications_active_outlined,
+                          'Reminder',
+                          _selectedReminderMinutes == null
+                              ? 'No reminder set'
+                              : AppConstants.reminderOptions.entries
+                                        .where(
+                                          (e) =>
+                                              e.value ==
+                                              _selectedReminderMinutes,
+                                        )
+                                        .firstOrNull
+                                        ?.key ??
+                                    '$_selectedReminderMinutes min before',
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         Text(
@@ -681,8 +736,7 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (brand != null)
-            _summaryRow(Icons.sell_outlined, 'Brand', brand),
+          if (brand != null) _summaryRow(Icons.sell_outlined, 'Brand', brand),
           if (product != null)
             _summaryRow(Icons.devices_other_outlined, 'Product', product),
           if (category != null)
@@ -724,6 +778,72 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
       onChanged: _isLoading
           ? null
           : (value) => setState(() => _selectedTimeSlot = value),
+    );
+  }
+
+  Future<void> _selectReminder(int? minutes) async {
+    setState(() {
+      _selectedReminderMinutes = minutes;
+      _reminderPermissionDenied = false;
+      _checkingReminderPermission = minutes != null;
+    });
+    if (minutes == null) return;
+    final allowed = await ref
+        .read(notificationServiceProvider)
+        .requestPermission();
+    if (!mounted) return;
+    setState(() {
+      _checkingReminderPermission = false;
+      _reminderPermissionDenied = !allowed;
+    });
+  }
+
+  Widget _reminderField() {
+    return DropdownButtonFormField<int>(
+      key: _reminderFieldKey,
+      focusNode: _reminderFocus,
+      initialValue: _selectedReminderMinutes,
+      validator: (value) {
+        if (value == null ||
+            _selectedDate == null ||
+            _selectedTimeSlot == null) {
+          return null;
+        }
+        final deadline = AppointmentReminderTime.reminderTime(
+          _selectedDate!,
+          _selectedTimeSlot,
+          value,
+        );
+        return deadline == null || !deadline.isAfter(DateTime.now())
+            ? 'Choose a shorter reminder or a later appointment time.'
+            : null;
+      },
+      decoration: InputDecoration(
+        labelText: 'Remind me (optional)',
+        enabled: !_isLoading && !_checkingReminderPermission,
+        prefixIcon: const Icon(Icons.notifications_active_outlined),
+        helperText: _checkingReminderPermission
+            ? 'Checking notification permission...'
+            : _reminderPermissionDenied
+            ? 'Your choice will be saved. Allow notifications in phone settings to receive reminders.'
+            : 'Choose how early to be reminded. Times use Philippine time.',
+        helperMaxLines: 4,
+        errorMaxLines: 3,
+      ),
+      hint: const Text('No reminder'),
+      isExpanded: true,
+      isDense: false,
+      itemHeight: null,
+      items: [
+        const DropdownMenuItem<int>(value: null, child: Text('No reminder')),
+        ...AppConstants.reminderOptions.entries.map(
+          (entry) =>
+              DropdownMenuItem(value: entry.value, child: Text(entry.key)),
+        ),
+      ],
+      onChanged: _isLoading || _checkingReminderPermission
+          ? null
+          : _selectReminder,
     );
   }
 

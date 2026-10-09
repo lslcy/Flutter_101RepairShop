@@ -11,6 +11,7 @@ class Appointment {
   final String? timeSlot;
   final String? status;
   final String? notes;
+  final int? reminderMinutes;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -23,6 +24,7 @@ class Appointment {
     this.timeSlot,
     this.status,
     this.notes,
+    this.reminderMinutes,
     this.createdAt,
     this.updatedAt,
   });
@@ -42,6 +44,7 @@ class Appointment {
       timeSlot: json['time_slot'] as String?,
       status: json['status'] as String?,
       notes: json['notes'] as String?,
+      reminderMinutes: (json['reminder_minutes'] as num?)?.toInt(),
       createdAt: createdAt,
       updatedAt: AppDates.parseTimestamp(json['updated_at']),
     );
@@ -57,6 +60,7 @@ class Appointment {
       'time_slot': timeSlot,
       'status': status ?? AppointmentStatus.pending,
       'notes': notes,
+      'reminder_minutes': reminderMinutes,
     };
   }
 

@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
 import 'package:flutter_101repairshop/core/validation/password_policy.dart';
 import 'package:flutter_101repairshop/core/widgets/app_button.dart';
 import 'package:flutter_101repairshop/core/widgets/app_text_field.dart';
+import 'package:flutter_101repairshop/core/widgets/password_requirements.dart';
+import 'package:flutter_101repairshop/features/auth/data/auth_flow_controller.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/forgot_password_screen.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/login_screen.dart';
 import 'package:flutter_101repairshop/features/auth/presentation/register_screen.dart';
@@ -27,6 +32,17 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       ProviderScope(
+        overrides: [
+          authFlowProvider.overrideWith((ref) {
+            final client = SupabaseClient(
+              'http://127.0.0.1:54321',
+              'test-anon-key',
+              authOptions: const AuthClientOptions(autoRefreshToken: false),
+            );
+            ref.onDispose(() => unawaited(client.dispose()));
+            return AuthFlowController(client);
+          }),
+        ],
         child: MaterialApp(
           theme: dark ? AppTheme.dark : AppTheme.light,
           builder: (context, child) => MediaQuery(
@@ -156,22 +172,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test(
-    'new password policy accepts eight or more characters without rewriting',
-    () {
-      expect(PasswordPolicy.minimumLength, 8);
-      for (final password in <String?>[null, '', '        ']) {
-        expect(PasswordPolicy.validate(password), 'Enter a password');
-      }
-      expect(
-        PasswordPolicy.validate('seven77'),
-        PasswordPolicy.minimumLengthMessage,
-      );
-      expect(PasswordPolicy.validate('eight888'), isNull);
-      expect(PasswordPolicy.validate('a longer passphrase'), isNull);
-      expect(PasswordPolicy.validate(' secret '), isNull);
-    },
-  );
+  test('new password policy requires every listed rule without rewriting', () {
+    expect(PasswordPolicy.minimumLength, 8);
+    for (final password in <String?>[null, '', '        ']) {
+      expect(PasswordPolicy.validate(password), 'Enter a password');
+    }
+    expect(
+      PasswordPolicy.validate('seven77'),
+      PasswordPolicy.minimumLengthMessage,
+    );
+    expect(PasswordPolicy.validate('eight888'), isNotNull);
+    expect(PasswordPolicy.validate('a longer passphrase'), isNotNull);
+    expect(PasswordPolicy.validate(' Secret1! '), isNull);
+    expect(PasswordPolicy.validate('Secret1!'), isNull);
+  });
 
   testWidgets(
     'registration removes intro and keeps required address guidance',
@@ -184,11 +198,106 @@ void main() {
       expect(find.text('Your details'), findsOneWidget);
       expect(field('Address (required)'), findsOneWidget);
       expect(find.text('Use my location'), findsOneWidget);
-      expect(find.text('At least 8 characters'), findsOneWidget);
+      expect(find.text('At least 8 characters'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
 
+  testWidgets(
+    'registration checklist follows focus, valid input, edits and autofill',
+    (tester) async {
+      await pumpForm(tester, const RegisterScreen());
+      final rules = ['length', 'special', 'uppercase', 'number'];
+      void expectChecklistHidden() {
+        for (final rule in rules) {
+          expect(
+            find.byKey(ValueKey('password_requirement_$rule')),
+            findsNothing,
+          );
+        }
+      }
+
+      void expectNeutralChecklist() {
+        for (final rule in rules) {
+          expect(
+            find.descendant(
+              of: find.byKey(ValueKey('password_requirement_$rule')),
+              matching: find.byIcon(Icons.info_outline),
+            ),
+            findsOneWidget,
+          );
+        }
+      }
+
+      expectChecklistHidden();
+      await tapVisible(tester, field('Password'));
+      expectFieldFocused(tester, field('Password'));
+      expectNeutralChecklist();
+      await tapVisible(tester, field('Confirm password'));
+      expectChecklistHidden();
+      await tapVisible(tester, field('Password'));
+      expectNeutralChecklist();
+
+      await tester.enterText(field('Password'), 'eight888');
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('password_requirement_special')),
+          matching: find.byIcon(Icons.cancel_outlined),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Passwords match'), findsNothing);
+
+      await tester.enterText(field('Password'), 'Complete1!');
+      await tester.pumpAndSettle();
+      expectFieldFocused(tester, field('Password'));
+      expectChecklistHidden();
+      await tester.enterText(field('Password'), 'Complete1');
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('password_requirement_special')),
+          matching: find.byIcon(Icons.cancel_outlined),
+        ),
+        findsOneWidget,
+      );
+      await tapVisible(tester, field('Confirm password'));
+      expect(find.text('At least 1 special character'), findsOneWidget);
+
+      // Password managers update the controller without invoking onChanged.
+      final passwordController = tester
+          .widget<EditableText>(
+            find.descendant(
+              of: field('Password'),
+              matching: find.byType(EditableText),
+            ),
+          )
+          .controller;
+      passwordController.text = 'Complete1!';
+      await tester.pumpAndSettle();
+      final requirements = tester.widget<PasswordRequirements>(
+        find.byType(PasswordRequirements),
+      );
+      expect(requirements.password, 'Complete1!');
+      expectChecklistHidden();
+      await tapVisible(tester, field('Password'));
+      expectChecklistHidden();
+      passwordController.clear();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<PasswordRequirements>(find.byType(PasswordRequirements))
+            .password,
+        isEmpty,
+      );
+      expectNeutralChecklist();
+      await tapVisible(tester, field('Confirm password'));
+      expectChecklistHidden();
+      expect(find.text('Passwords match'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('registration password visibility retains the exact password', (
     tester,
   ) async {
@@ -232,8 +341,8 @@ void main() {
     expect(find.text('Passwords match'), findsNothing);
     expect(find.text(PasswordPolicy.minimumLengthMessage), findsOneWidget);
 
-    await enterPassword('Password', 'eight888');
-    await enterPassword('Confirm password', 'eight888');
+    await enterPassword('Password', 'Eight888!');
+    await enterPassword('Confirm password', 'Eight888!');
     expect(find.text('Passwords match'), findsOneWidget);
 
     await enterPassword('Password', 'different123');
@@ -249,8 +358,8 @@ void main() {
         'First name': 'Alex',
         'Last name': 'Reyes',
         'Email address': 'alex@example.com',
-        'Password': 'secret123',
-        'Confirm password': 'secret123',
+        'Password': 'Secret123!',
+        'Confirm password': 'Secret123!',
       }.entries) {
         await tester.ensureVisible(field(entry.key));
         await tester.enterText(field(entry.key), entry.value);

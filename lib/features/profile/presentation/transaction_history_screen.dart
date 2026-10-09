@@ -15,6 +15,7 @@ import '../../../core/widgets/status_badge.dart';
 import '../../shared/models/transaction.dart' as models;
 import '../../shared/widgets/payment_summary.dart';
 import '../data/transactions_repository.dart';
+import '../../payments/data/payment_submission_repository.dart';
 
 class TransactionHistoryScreen extends ConsumerStatefulWidget {
   const TransactionHistoryScreen({super.key});
@@ -85,6 +86,9 @@ class _TransactionHistoryScreenState
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(paymentUpdatesProvider, (_, _) {
+      if (mounted) _loadTransactions();
+    });
     return Scaffold(
       appBar: AppBar(title: const Text('Transactions')),
       body: SafeArea(
@@ -259,7 +263,12 @@ class _TransactionHistoryScreenState
                     ),
                   ),
                 ],
-                if (transaction.canPayOnline) ...[
+                if (!transaction.isPaid) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  CustomerPaymentButton(transaction: transaction),
+                ],
+                if (transaction.canPayOnline &&
+                    !(transaction.customerPayment?.isPending ?? false)) ...[
                   const SizedBox(height: AppSpacing.sm),
                   PayOnlineButton(url: transaction.paymentUrl!),
                 ],

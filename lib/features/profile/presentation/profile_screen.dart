@@ -68,22 +68,88 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (_isSigningOut) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sign out?'),
-        content: const Text(
-          'You can sign back in to view your repairs and appointments.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Stay signed in'),
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        final colors = theme.colorScheme;
+        return AlertDialog(
+          semanticLabel: 'Sign out confirmation',
+          backgroundColor: colors.surface,
+          surfaceTintColor: Colors.transparent,
+          constraints: const BoxConstraints(maxWidth: 400),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.lg,
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sign out'),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+            side: BorderSide(color: colors.outlineVariant),
           ),
-        ],
-      ),
+          titlePadding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            0,
+          ),
+          title: Row(
+            children: [
+              ExcludeSemantics(
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                  child: Icon(
+                    Icons.logout_outlined,
+                    color: colors.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text('Sign out?', style: theme.textTheme.titleLarge),
+                ),
+              ),
+            ],
+          ),
+          scrollable: true,
+          contentPadding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.lg,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Your repairs and appointments will stay saved.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Sign out', textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton(
+                autofocus: true,
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text(
+                  'Stay signed in',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
     if (confirmed != true || !mounted) return;
     setState(() => _isSigningOut = true);
@@ -266,7 +332,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   Icons.devices_outlined,
                                   'My appliances',
                                   'Manage your registered appliances',
-                                  () => context.push('/profile/appliances'),
+                                  () => context.go('/profile/appliances'),
                                 ),
                                 const Divider(
                                   height: 1,
@@ -277,7 +343,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   Icons.receipt_long_outlined,
                                   'Transaction history',
                                   'View your repair payments',
-                                  () => context.push('/profile/transactions'),
+                                  () => context.go('/profile/transactions'),
                                 ),
                               ],
                             ),

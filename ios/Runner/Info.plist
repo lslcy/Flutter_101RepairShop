@@ -24,6 +24,8 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a GCash receipt screenshot to submit for payment review.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Use your current location to fill in your address when you tap Use my location. You can also enter your address manually.</string>
 	<key>FlutterDeepLinkingEnabled</key>

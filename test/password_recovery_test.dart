@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:flutter_101repairshop/core/validation/password_policy.dart';
 import 'package:flutter_101repairshop/features/auth/data/auth_flow_controller.dart';
 import 'package:flutter_101repairshop/features/auth/data/auth_repository.dart';
 
@@ -110,7 +111,7 @@ void main() {
       await expectLater(
         notifier.signUp(
           email: 'customer@example.com',
-          password: '1234567',
+          password: 'Ab1!abc',
           firstName: 'Alex',
           lastName: 'Reyes',
           address: '10 Mabini Street, Davao City',
@@ -123,10 +124,80 @@ void main() {
     },
   );
 
+  for (final invalid in <String, String>{
+    'Abcdef12': PasswordPolicy.specialCharacterMessage,
+    'abcdef1!': PasswordPolicy.uppercaseLetterMessage,
+    'Abcdefg!': PasswordPolicy.numberMessage,
+  }.entries) {
+    test('signup blocks an unmet requirement: ${invalid.value}', () async {
+      await expectLater(
+        notifier.signUp(
+          email: 'customer@example.com',
+          password: invalid.key,
+          firstName: 'Alex',
+          lastName: 'Reyes',
+          address: '10 Mabini Street, Davao City',
+        ),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.message,
+            'message',
+            invalid.value,
+          ),
+        ),
+      );
+      expect(server.signupBodies, isEmpty);
+      expect(client.auth.currentSession, isNull);
+      expect(notifier.state.isLoading, isFalse);
+    });
+
+    test('recovery blocks an unmet requirement: ${invalid.value}', () async {
+      final flow = await recoverBeforeControllerStarts();
+      await expectLater(
+        flow.updatePassword(invalid.key),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.message,
+            'message',
+            invalid.value,
+          ),
+        ),
+      );
+      expect(server.updateBodies, isEmpty);
+      expect(flow.stage, PasswordRecoveryStage.ready);
+      expect(flow.canResetPassword, isTrue);
+    });
+  }
+
+  test(
+    'signup submits the password exactly as entered, including spaces',
+    () async {
+      const password = ' Ab1!   ';
+      await notifier.signUp(
+        email: 'customer@example.com',
+        password: password,
+        firstName: 'Alex',
+        lastName: 'Reyes',
+        address: '10 Mabini Street, Davao City',
+      );
+      expect(server.signupBodies.single['password'], password);
+    },
+  );
+
+  test(
+    'recovery submits the password exactly as entered, including spaces',
+    () async {
+      final flow = await recoverBeforeControllerStarts();
+      const password = ' Ab1!   ';
+      await flow.updatePassword(password);
+      expect(server.updateBodies.single['password'], password);
+      expect(flow.stage, PasswordRecoveryStage.complete);
+    },
+  );
   test('an eight-character signup reaches the service', () async {
     final needsConfirmation = await notifier.signUp(
       email: 'customer@example.com',
-      password: '12345678',
+      password: 'Abcde1!f',
       firstName: 'Alex',
       lastName: 'Reyes',
       address: '10 Mabini Street, Davao City',
@@ -134,7 +205,7 @@ void main() {
 
     expect(needsConfirmation, isTrue);
     expect(server.signupBodies, hasLength(1));
-    expect(server.signupBodies.single['password'], '12345678');
+    expect(server.signupBodies.single['password'], 'Abcde1!f');
     expect(client.auth.currentSession, isNull);
   });
 
@@ -144,7 +215,7 @@ void main() {
       final flow = await recoverBeforeControllerStarts();
 
       await expectLater(
-        flow.updatePassword('1234567'),
+        flow.updatePassword('Ab1!abc'),
         throwsA(isA<ArgumentError>()),
       );
 
@@ -165,7 +236,7 @@ void main() {
       expect(client.auth.currentSession, isNotNull);
       expect(flow.stage, PasswordRecoveryStage.idle);
       await expectLater(
-        flow.updatePassword('12345678'),
+        flow.updatePassword('Abcde1!f'),
         throwsA(isA<AuthException>()),
       );
       expect(server.updateBodies, isEmpty);
@@ -179,10 +250,10 @@ void main() {
     () async {
       final flow = await recoverBeforeControllerStarts();
 
-      await flow.updatePassword('12345678');
+      await flow.updatePassword('Abcde1!f');
 
       expect(server.updateBodies, hasLength(1));
-      expect(server.updateBodies.single['password'], '12345678');
+      expect(server.updateBodies.single['password'], 'Abcde1!f');
       expect(server.updateAuthorizations.single, startsWith('Bearer '));
       expect(flow.stage, PasswordRecoveryStage.complete);
       expect(flow.requiresRecovery, isTrue);
@@ -190,7 +261,7 @@ void main() {
 
       // A second submit after completion must not repeat the write.
       await expectLater(
-        flow.updatePassword('different-password'),
+        flow.updatePassword('Different-password1!'),
         throwsA(isA<AuthException>()),
       );
       expect(server.updateBodies, hasLength(1));
@@ -209,7 +280,7 @@ void main() {
       server.rejectUpdate = true;
 
       await expectLater(
-        flow.updatePassword('12345678'),
+        flow.updatePassword('Abcde1!f'),
         throwsA(isA<AuthException>()),
       );
       expect(flow.stage, PasswordRecoveryStage.ready);
@@ -217,9 +288,9 @@ void main() {
       expect(server.updateBodies, hasLength(1));
 
       server.rejectUpdate = false;
-      await flow.updatePassword('new-password');
+      await flow.updatePassword('New-password1!');
       expect(server.updateBodies, hasLength(2));
-      expect(server.updateBodies.last['password'], 'new-password');
+      expect(server.updateBodies.last['password'], 'New-password1!');
       expect(flow.stage, PasswordRecoveryStage.complete);
     },
   );
@@ -232,7 +303,7 @@ void main() {
       server.updateErrorStatus = HttpStatus.unauthorized;
 
       await expectLater(
-        flow.updatePassword('12345678'),
+        flow.updatePassword('Abcde1!f'),
         throwsA(
           isA<AuthException>().having((error) => error.code, 'code', code),
         ),
@@ -243,7 +314,7 @@ void main() {
       expect(server.updateBodies, hasLength(1));
 
       await expectLater(
-        flow.updatePassword('another-password'),
+        flow.updatePassword('Another-password1!'),
         throwsA(isA<AuthException>()),
       );
       expect(server.updateBodies, hasLength(1));
@@ -252,7 +323,7 @@ void main() {
       await verifyRecovery();
       await _waitForStage(flow, PasswordRecoveryStage.ready);
       expect(flow.canResetPassword, isTrue);
-      await flow.updatePassword('new-password');
+      await flow.updatePassword('New-password1!');
       expect(server.updateBodies, hasLength(2));
       expect(flow.stage, PasswordRecoveryStage.complete);
     });
@@ -302,7 +373,7 @@ void main() {
       await client.auth.signOut(scope: SignOutScope.local);
       await _waitForStage(flow, PasswordRecoveryStage.invalid);
       await expectLater(
-        flow.updatePassword('12345678'),
+        flow.updatePassword('Abcde1!f'),
         throwsA(isA<AuthException>()),
       );
 
@@ -328,7 +399,7 @@ void main() {
         expect(flow.requiresRecovery, isTrue);
         expect(flow.canResetPassword, isFalse);
         await expectLater(
-          flow.updatePassword('12345678'),
+          flow.updatePassword('Abcde1!f'),
           throwsA(isA<AuthException>()),
         );
         expect(server.updateBodies, isEmpty);
@@ -369,7 +440,7 @@ void main() {
     });
     final pendingSignup = registeringNotifier.signUp(
       email: 'customer@example.com',
-      password: '12345678',
+      password: 'Abcde1!f',
       firstName: 'Alex',
       lastName: 'Reyes',
       address: '10 Mabini Street, Davao City',
@@ -393,14 +464,22 @@ void main() {
     }
   });
 
-  test('web recovery URL has no empty query marker', () {
-    final destination = AuthRedirects.passwordReset(
-      webBase: Uri.parse('https://example.com:8443/app/?token=old#/login'),
-    );
+  test(
+    'web recovery URL marks callback origin and removes stale query values',
+    () {
+      final destination = AuthRedirects.passwordReset(
+        webBase: Uri.parse('https://example.com:8443/app/?token=old#/login'),
+      );
 
-    expect(destination, 'https://example.com:8443/app/#/reset-password');
-    expect(destination, isNot(contains('?')));
-  });
+      expect(
+        destination,
+        'https://example.com:8443/app/?auth_callback=recovery#/reset-password',
+      );
+      expect(Uri.parse(destination).queryParameters, {
+        'auth_callback': 'recovery',
+      });
+    },
+  );
   test('web recovery destination preserves its hosting subdirectory', () {
     final result = Uri.parse(
       AuthRedirects.passwordReset(
@@ -410,7 +489,7 @@ void main() {
 
     expect(result.origin, 'https://example.com');
     expect(result.path, '/repair-app/');
-    expect(result.query, isEmpty);
+    expect(result.queryParameters, {'auth_callback': 'recovery'});
     expect(result.fragment, '/reset-password');
   });
 }

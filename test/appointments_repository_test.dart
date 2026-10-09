@@ -63,7 +63,7 @@ void main() {
   test(
     'booking uses the authenticated customer with a persisted address',
     () async {
-      await repository.bookAppointment({
+      final insertedId = await repository.bookAppointment({
         ...booking,
         'customer_id': 'other-user',
       });
@@ -71,11 +71,50 @@ void main() {
       expect(server.bookings, [
         {...booking, 'customer_id': 'customer-1'},
       ]);
+      expect(insertedId, 1);
     },
   );
 
+  for (final minutes in [-1, 0, 10081, 1.5, '15']) {
+    test('booking rejects invalid reminder leadtime $minutes', () async {
+      await expectLater(
+        repository.bookAppointment({
+          ...booking,
+          'reminder_minutes': minutes,
+          'appointment_date': '2099-10-11',
+          'time_slot': '8:00 AM - 9:00 AM',
+        }),
+        throwsA(isA<StateError>()),
+      );
+      expect(server.bookings, isEmpty);
+    });
+  }
+
+  test('booking does not default a malformed reminder slot to 8 AM', () async {
+    await expectLater(
+      repository.bookAppointment({
+        ...booking,
+        'reminder_minutes': 15,
+        'appointment_date': '2099-10-11',
+        'time_slot': '13:60 PM',
+      }),
+      throwsA(isA<StateError>()),
+    );
+    expect(server.bookings, isEmpty);
+  });
+
+  test('booking persists a valid customer-selected reminder', () async {
+    final data = {
+      ...booking,
+      'reminder_minutes': 15,
+      'appointment_date': '2099-10-11',
+      'time_slot': '8:00 AM - 9:00 AM',
+    };
+    await repository.bookAppointment(data);
+    expect(server.bookings.single['reminder_minutes'], 15);
+  });
   test('each booking rechecks the current stored address', () async {
-    await repository.bookAppointment(booking);
+    expect(await repository.bookAppointment(booking), 1);
     server.customer!['address'] = '';
 
     await expectLater(
@@ -143,7 +182,9 @@ class _BookingServer {
         request.method == 'POST') {
       bookings.add(jsonDecode(body) as Map<String, dynamic>);
       request.response.statusCode = HttpStatus.created;
-      await request.response.close();
+      await _respond(request, [
+        {'id': bookings.length},
+      ]);
       return;
     }
     request.response.statusCode = HttpStatus.notFound;

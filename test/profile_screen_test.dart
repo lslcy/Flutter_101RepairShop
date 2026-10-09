@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_101repairshop/core/validation/customer_identity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter_101repairshop/core/theme/app_theme.dart';
@@ -32,6 +33,7 @@ class _Customers extends CustomerRepository {
     updatedAt: DateTime.utc(2025, 3, 4),
   );
   final saved = <Customer>[];
+  Object? saveError;
 
   @override
   Future<Customer?> getCurrentCustomer() async {
@@ -40,6 +42,7 @@ class _Customers extends CustomerRepository {
 
   @override
   Future<void> updateProfile(Customer customer) async {
+    if (saveError != null) throw saveError!;
     saved.add(customer);
     current = customer;
   }
@@ -110,8 +113,10 @@ void main() {
   }
 
   Future<void> tapVisible(WidgetTester tester, Finder finder) async {
-    await tester.ensureVisible(finder);
     await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pumpAndSettle();
+    expect(finder.hitTestable(), findsOneWidget);
     await tester.tap(finder);
     await tester.pumpAndSettle();
   }
@@ -140,7 +145,10 @@ void main() {
       expect(saved.firstName, original.firstName);
       expect(saved.lastName, original.lastName);
       expect(saved.email, original.email);
-      expect(saved.phoneNo, original.phoneNo);
+      expect(
+        saved.phoneNo,
+        CustomerIdentity.normalizeOptionalPhone(original.phoneNo),
+      );
       expect(find.byType(EditProfileScreen), findsNothing);
       expect(find.text(_multilineAddress), findsOneWidget);
       expect(find.text(_originalAddress), findsNothing);
@@ -219,4 +227,74 @@ void main() {
     expect(customers.saved, isEmpty);
     expect(tester.takeException(), isNull);
   });
+  testWidgets('profile editor rejects invalid contacts and focuses them', (
+    tester,
+  ) async {
+    final customers = _Customers();
+    await pumpProfile(tester, customers);
+    await tapVisible(tester, find.text('Edit address'));
+    Finder input(String label) => find.descendant(
+      of: find.widgetWithText(AppTextField, label),
+      matching: find.byType(TextFormField),
+    );
+    final email = input('Contact email');
+    await tester.ensureVisible(email);
+    await tester.enterText(email, 'invalid@example..com');
+    await tapVisible(tester, find.text('Save changes'));
+    expect(customers.saved, isEmpty);
+    expect(
+      find.text('Enter a valid email address').hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(of: email, matching: find.byType(EditableText)),
+          )
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.enterText(email, 'alex@example.com');
+    final phone = input('Phone number (optional)');
+    await tester.ensureVisible(phone);
+    await tester.enterText(phone, '12345');
+    await tapVisible(tester, find.text('Save changes'));
+    expect(customers.saved, isEmpty);
+    expect(
+      find.text('Enter a valid phone number').hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(of: phone, matching: find.byType(EditableText)),
+          )
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'duplicate profile contact keeps the saved identity and shows a useful error',
+    (tester) async {
+      final customers = _Customers();
+      customers.saveError = const PostgrestException(
+        message: 'duplicate key value violates unique constraint "customers_phone_no_unique"',
+        code: '23505',
+      );
+      await pumpProfile(tester, customers);
+      await tapVisible(tester, find.text('Edit address'));
+      await tapVisible(tester, find.text('Save changes'));
+
+      expect(customers.saved, isEmpty);
+      expect(find.byType(EditProfileScreen), findsOneWidget);
+      expect(find.textContaining('already'), findsOneWidget);
+      expect(customers.current.phoneNo, '09171234567');
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

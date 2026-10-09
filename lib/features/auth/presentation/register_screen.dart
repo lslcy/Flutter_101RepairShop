@@ -7,9 +7,12 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/validation/password_policy.dart';
+import '../../../core/validation/customer_identity.dart';
+import '../../../core/utils/account_errors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/address_input.dart';
+import '../../../core/widgets/password_requirements.dart';
 import '../data/auth_repository.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -44,6 +47,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _isLoading = false;
+  bool _showPasswordErrors = false;
   bool _showMatchStatus = false;
   bool _passwordsMatch = false;
   String? _errorMessage;
@@ -51,6 +55,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   @override
   void initState() {
     super.initState();
+    _fieldFocus[_passwordController]!.addListener(_onPasswordFocusChanged);
     _passwordController.addListener(_checkPasswordMatch);
     _confirmPasswordController.addListener(_checkPasswordMatch);
   }
@@ -64,8 +69,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
   }
 
+  void _onPasswordFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _fieldFocus[_passwordController]!.removeListener(_onPasswordFocusChanged);
     _firstNameController.dispose();
     _lastNameController.dispose();
     _emailController.dispose();
@@ -86,7 +96,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       return 'An account with this email already exists. Try signing in.';
     }
     if (lower.contains('weak password') || lower.contains('password')) {
-      return 'Use at least 8 characters for your password.';
+      return PasswordPolicy.requirementsMessage;
     }
     if (lower.contains('invalid email') ||
         lower.contains('unable to validate')) {
@@ -105,6 +115,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   Future<void> _handleRegister() async {
     if (_isLoading) return;
+    setState(() => _showPasswordErrors = true);
     final invalid = _formKey.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
       // LayoutBuilder registers the name fields later than the email field.
@@ -131,11 +142,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       final needsConfirmation = await ref
           .read(authStateProvider.notifier)
           .signUp(
-            email: _emailController.text.trim(),
+            email: CustomerIdentity.normalizeEmail(_emailController.text),
             password: _passwordController.text,
-            firstName: _firstNameController.text.trim(),
-            lastName: _lastNameController.text.trim(),
-            phoneNo: _phoneController.text.trim(),
+            firstName: CustomerIdentity.normalizeName(
+              _firstNameController.text,
+            ),
+            lastName: CustomerIdentity.normalizeName(_lastNameController.text),
+            phoneNo: CustomerIdentity.normalizeOptionalPhone(
+              _phoneController.text,
+            ),
             address: _addressController.text.trim(),
           );
       TextInput.finishAutofillContext();
@@ -154,7 +169,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       context.go('/login');
     } catch (error) {
       if (!mounted) return;
-      setState(() => _errorMessage = _getFriendlyError(error.toString()));
+      setState(
+        () => _errorMessage = friendlyAccountError(
+          error,
+          fallback: _getFriendlyError(error.toString()),
+        ),
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final feedbackContext = _feedbackKey.currentContext;
         if (mounted && feedbackContext != null) _reveal(feedbackContext);
@@ -227,9 +247,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       textInputAction: TextInputAction.next,
       onFieldSubmitted: (_) => _fieldFocus[_lastNameController]!.requestFocus(),
       autofillHints: const [AutofillHints.givenName],
-      validator: (value) => value == null || value.trim().isEmpty
-          ? 'Enter your first name'
-          : null,
+      validator: (value) =>
+          CustomerIdentity.validateName(value, fieldName: 'first name'),
     );
     final lastName = AppTextField(
       label: 'Last name',
@@ -243,7 +262,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       onFieldSubmitted: (_) => _fieldFocus[_emailController]!.requestFocus(),
       autofillHints: const [AutofillHints.familyName],
       validator: (value) =>
-          value == null || value.trim().isEmpty ? 'Enter your last name' : null,
+          CustomerIdentity.validateName(value, fieldName: 'last name'),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -297,14 +316,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 .requestFocus(),
         autofillHints: const [AutofillHints.email],
         prefixIcon: const Icon(Icons.mail_outline, size: 20),
-        validator: (value) {
-          final email = value?.trim() ?? '';
-          if (email.isEmpty) return 'Enter your email address';
-          if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
-            return 'Enter a valid email address';
-          }
-          return null;
-        },
+        validator: CustomerIdentity.validateEmail,
       ),
       if (_showPhoneField) ...[
         const SizedBox(height: 16),
@@ -322,6 +334,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               _fieldFocus[_addressController]!.requestFocus(),
           autofillHints: const [AutofillHints.telephoneNumber],
           prefixIcon: const Icon(Icons.phone_outlined, size: 20),
+          validator: CustomerIdentity.validateOptionalPhone,
         ),
       ] else ...[
         const SizedBox(height: 8),
@@ -338,8 +351,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   );
 
   Widget _securitySection() {
-    final passwordMeetsMinimum =
-        PasswordPolicy.validate(_passwordController.text) == null;
     final matchColor = Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF6EE7B7)
         : const Color(0xFF047857);
@@ -373,7 +384,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           ),
           validator: PasswordPolicy.validate,
         ),
-        _passwordRequirement(passwordMeetsMinimum, matchColor),
+        PasswordRequirements(
+          password: _passwordController.text,
+          showErrors: _showPasswordErrors,
+          isEditing: _fieldFocus[_passwordController]!.hasFocus,
+        ),
         const SizedBox(height: 16),
         AppTextField(
           label: 'Confirm password',
@@ -430,37 +445,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ),
           ),
       ],
-    );
-  }
-
-  Widget _passwordRequirement(bool isMet, Color successColor) {
-    final colors = Theme.of(context).colorScheme;
-    final color = isMet ? successColor : colors.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Semantics(
-        liveRegion: true,
-        label: isMet
-            ? 'Password requirement met: at least 8 characters'
-            : 'Password requirement: at least 8 characters',
-        excludeSemantics: true,
-        child: Row(
-          children: [
-            Icon(
-              isMet ? Icons.check_circle_outline : Icons.info_outline,
-              size: 18,
-              color: color,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'At least 8 characters',
-                style: AppTextStyles.bodySmall.copyWith(color: color),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

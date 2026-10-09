@@ -1,13 +1,13 @@
-﻿import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Finds the `customers` row that belongs to the signed-in Supabase user.
 ///
-/// The app never creates or links customer rows itself:
-///   * RLS only lets a customer SELECT/UPDATE their own row
-///     (`auth_id = auth.uid()`); there is no INSERT policy.
-///   * The `handle_new_user` DB trigger creates the row on sign-up from
-///     `raw_user_meta_data`, and links a sign-up to an existing
-///     counter-created customer with the same email instead of duplicating it.
+/// Direct customer access is limited to the user's own row
+/// (`auth_id = auth.uid()`); the app has no customer INSERT policy.
+/// The signup trigger creates an owned row from registration metadata. External
+/// users finish setup through the verified `complete_customer_profile` RPC.
+/// Neither this lookup nor profile completion links a different customer's row
+/// by an email or phone entered in a form.
 ///
 /// The customer's own `id` (uuid) must be used for every `customer_id`
 /// foreign key, never the auth user id.

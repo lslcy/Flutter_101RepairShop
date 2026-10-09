@@ -33,4 +33,15 @@ class AppConstants {
 
   // Appliance sizes (must match `appliances.appliance_size` in the web admin)
   static const applianceSizes = ['Small', 'Medium', 'Large'];
+
+  // Reminder options: label → minutes before appointment
+  static const reminderOptions = <String, int>{
+    '5 minutes before': 5,
+    '10 minutes before': 10,
+    '15 minutes before': 15,
+    '30 minutes before': 30,
+    '1 hour before': 60,
+    '2 hours before': 120,
+    '1 day before': 1440,
+  };
 }

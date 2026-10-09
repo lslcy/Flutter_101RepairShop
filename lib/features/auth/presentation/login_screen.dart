@@ -7,6 +7,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../data/auth_flow_controller.dart';
 import '../data/auth_repository.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -25,8 +26,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   final _feedbackKey = GlobalKey();
+  final _googleFeedbackKey = GlobalKey();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _isGoogleLaunching = false;
   String? _errorMessage;
 
   @override
@@ -44,12 +47,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-  void _reveal(BuildContext fieldContext) {
+  void _reveal(BuildContext fieldContext, {double alignment = 0.2}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !fieldContext.mounted) return;
       Scrollable.ensureVisible(
         fieldContext,
-        alignment: 0.2,
+        alignment: alignment,
         duration: MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
             : const Duration(milliseconds: 200),
@@ -57,12 +60,58 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
   }
 
+  bool get _isBusy =>
+      _isLoading ||
+      _isGoogleLaunching ||
+      ref.read(authFlowProvider).isGoogleSignInPending;
+
   void _clearError(String _) {
     if (_errorMessage != null) setState(() => _errorMessage = null);
+    final flow = ref.read(authFlowProvider);
+    if (flow.googleSignInError != null) flow.cancelGoogleSignIn();
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    if (_isBusy) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isGoogleLaunching = true;
+      _errorMessage = null;
+    });
+    try {
+      final launched = await ref
+          .read(authStateProvider.notifier)
+          .signInWithGoogle();
+      if (!mounted) return;
+      if (!launched) {
+        setState(() {
+          _errorMessage = 'We could not open Google sign-in. Please try again.';
+        });
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final feedbackContext = launched
+            ? _googleFeedbackKey.currentContext
+            : _feedbackKey.currentContext;
+        if (mounted && feedbackContext != null) {
+          _reveal(feedbackContext, alignment: 0);
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _getFriendlyError(error.toString()));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final feedbackContext = _feedbackKey.currentContext;
+        if (mounted && feedbackContext != null) {
+          _reveal(feedbackContext, alignment: 0);
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _isGoogleLaunching = false);
+    }
   }
 
   Future<void> _handleLogin() async {
-    if (_isLoading) return;
+    if (_isBusy) return;
     final invalid = _formKey.currentState!.validateGranularly();
     if (invalid.isNotEmpty) {
       final field = invalid.first.widget as TextFormField;
@@ -72,6 +121,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
     FocusScope.of(context).unfocus();
+    ref.read(authFlowProvider).cancelGoogleSignIn();
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -88,7 +138,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() => _errorMessage = _getFriendlyError(error.toString()));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final feedbackContext = _feedbackKey.currentContext;
-        if (mounted && feedbackContext != null) _reveal(feedbackContext);
+        if (mounted && feedbackContext != null) {
+          _reveal(feedbackContext, alignment: 0);
+        }
       });
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -97,6 +149,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   String _getFriendlyError(String error) {
     final lower = error.toLowerCase();
+    if (lower.contains('provider is not enabled') ||
+        lower.contains('unsupported provider') ||
+        lower.contains('provider_disabled') ||
+        lower.contains('provider_not_enabled')) {
+      return 'Google sign-in is not available yet. Please use another sign-in method.';
+    }
     if (lower.contains('invalid login credentials') ||
         lower.contains('invalid_credentials')) {
       return 'Incorrect email or password. Check your details and try again.';
@@ -118,6 +176,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final flow = ref.watch(authFlowProvider);
+    final isBusy =
+        _isLoading || _isGoogleLaunching || flow.isGoogleSignInPending;
+    final errorMessage = _errorMessage ?? flow.googleSignInError;
+    ref.listen<String?>(
+      authFlowProvider.select((controller) => controller.googleSignInError),
+      (previous, next) {
+        if (next == null || next == previous) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final feedbackContext = _feedbackKey.currentContext;
+          if (mounted && feedbackContext != null) {
+            _reveal(feedbackContext, alignment: 0);
+          }
+        });
+      },
+    );
     final largeText = MediaQuery.textScalerOf(context).scale(22) > 36;
     final horizontalPadding = MediaQuery.sizeOf(context).width < 360
         ? 20.0
@@ -140,7 +214,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         leading: IconButton(
           tooltip: 'Back',
           icon: const Icon(Icons.arrow_back_outlined),
-          onPressed: _isLoading
+          onPressed: isBusy
               ? null
               : () {
                   if (context.canPop()) {
@@ -175,13 +249,48 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (errorMessage != null) ...[
+                        Semantics(
+                          key: _feedbackKey,
+                          liveRegion: true,
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: colors.errorContainer,
+                              borderRadius: BorderRadius.circular(
+                                AppSpacing.radiusMd,
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  color: colors.onErrorContainer,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    errorMessage,
+                                    style: AppTextStyles.body.copyWith(
+                                      color: colors.onErrorContainer,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       AppTextField(
                         label: 'Email address',
                         labelStyle: fieldLabelStyle,
                         hint: 'you@example.com',
                         controller: _emailController,
                         focusNode: _emailFocus,
-                        enabled: !_isLoading,
+                        enabled: !isBusy,
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
                         autofillHints: const [
@@ -208,7 +317,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         hint: 'Enter your password',
                         controller: _passwordController,
                         focusNode: _passwordFocus,
-                        enabled: !_isLoading,
+                        enabled: !isBusy,
                         obscureText: _obscurePassword,
                         textInputAction: TextInputAction.done,
                         autofillHints: const [AutofillHints.password],
@@ -225,7 +334,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 : Icons.visibility_outlined,
                             size: 20,
                           ),
-                          onPressed: _isLoading
+                          onPressed: isBusy
                               ? null
                               : () => setState(
                                   () => _obscurePassword = !_obscurePassword,
@@ -243,7 +352,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextButton.styleFrom(
                             minimumSize: const Size(48, 48),
                           ),
-                          onPressed: _isLoading
+                          onPressed: isBusy
                               ? null
                               : () {
                                   FocusScope.of(context).unfocus();
@@ -256,46 +365,113 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      if (_errorMessage != null) ...[
+                      AppButton(
+                        label: 'Sign in',
+                        loadingLabel: 'Signing in...',
+                        onPressed: isBusy ? null : _handleLogin,
+                        isLoading: _isLoading,
+                        width: double.infinity,
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          const Expanded(child: Divider(height: 1)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'Or',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          const Expanded(child: Divider(height: 1)),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      AppButton(
+                        label: 'Continue with Google',
+                        leading: Image.asset(
+                          'assets/images/google_g.png',
+                          width: 20,
+                          height: 20,
+                          excludeFromSemantics: true,
+                        ),
+                        loadingLabel: 'Opening Google...',
+                        onPressed: isBusy ? null : _handleGoogleSignIn,
+                        isLoading: _isGoogleLaunching,
+                        isOutlined: true,
+                        width: double.infinity,
+                      ),
+                      if (flow.isGoogleSignInPending &&
+                          !_isGoogleLaunching) ...[
+                        const SizedBox(height: 12),
                         Semantics(
-                          key: _feedbackKey,
+                          key: _googleFeedbackKey,
                           liveRegion: true,
                           child: Container(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                             decoration: BoxDecoration(
-                              color: colors.errorContainer,
+                              color: colors.primaryContainer,
                               borderRadius: BorderRadius.circular(
                                 AppSpacing.radiusMd,
                               ),
                             ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Icon(
-                                  Icons.error_outline,
-                                  color: colors.onErrorContainer,
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _errorMessage!,
-                                    style: AppTextStyles.body.copyWith(
-                                      color: colors.onErrorContainer,
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.open_in_new_outlined,
+                                      color: colors.onPrimaryContainer,
+                                      size: 22,
                                     ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Finish signing in with Google in your browser.',
+                                        style: AppTextStyles.body.copyWith(
+                                          color: colors.onPrimaryContainer,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                TextButton(
+                                  onPressed: _isGoogleLaunching
+                                      ? null
+                                      : () {
+                                          ref
+                                              .read(authFlowProvider)
+                                              .cancelGoogleSignIn();
+                                        },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: colors.onPrimaryContainer,
+                                    minimumSize: const Size(48, 48),
+                                  ),
+                                  child: const Text(
+                                    'Use another sign-in method',
                                   ),
                                 ),
                               ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
                       ],
+                      const SizedBox(height: 12),
                       AppButton(
-                        label: 'Sign in',
-                        loadingLabel: 'Signing in...',
-                        onPressed: _handleLogin,
-                        isLoading: _isLoading,
+                        label: 'Continue with phone',
+                        icon: Icons.phone_outlined,
+                        onPressed: isBusy
+                            ? null
+                            : () {
+                                FocusScope.of(context).unfocus();
+                                context.go('/phone-sign-in');
+                              },
+                        isOutlined: true,
                         width: double.infinity,
                       ),
                       const SizedBox(height: 24),
@@ -315,7 +491,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             style: TextButton.styleFrom(
                               minimumSize: const Size(48, 48),
                             ),
-                            onPressed: _isLoading
+                            onPressed: isBusy
                                 ? null
                                 : () => context.go('/register'),
                             child: const Text('Create account'),

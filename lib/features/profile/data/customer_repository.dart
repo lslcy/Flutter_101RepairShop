@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/customer_account_service.dart';
+import '../../../core/validation/customer_identity.dart';
 import '../../shared/models/customer.dart';
 import '../../shared/models/appliance.dart';
 
@@ -67,10 +68,35 @@ class CustomerRepository {
     if (address.isEmpty) {
       throw ArgumentError('An address is required to save your profile.');
     }
+    final identityError =
+        CustomerIdentity.validateName(
+          customer.firstName,
+          fieldName: 'first name',
+        ) ??
+        CustomerIdentity.validateName(
+          customer.lastName,
+          fieldName: 'last name',
+        ) ??
+        CustomerIdentity.validateEmail(customer.email, required: false) ??
+        CustomerIdentity.validateOptionalPhone(customer.phoneNo);
+    if (identityError != null) throw ArgumentError(identityError);
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw const AuthException('Sign in again to save your details.');
+    }
+    final email = CustomerIdentity.normalizeEmail(customer.email ?? '');
     final updated = await _supabase
         .from('customers')
-        .update({...customer.toJson(), 'address': address})
+        .update({
+          ...customer.toJson(),
+          'first_name': CustomerIdentity.normalizeName(customer.firstName!),
+          'last_name': CustomerIdentity.normalizeName(customer.lastName!),
+          'email': email.isEmpty ? null : email,
+          'phone_no': CustomerIdentity.normalizeOptionalPhone(customer.phoneNo),
+          'address': address,
+        })
         .eq('id', customer.id)
+        .eq('auth_id', user.id)
         .isFilter('deleted_at', null)
         .select('id');
     if (updated.isEmpty) {

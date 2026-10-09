@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_text_styles.dart';
-import '../theme/app_spacing.dart';
 
 class AppTextField extends StatelessWidget {
   final String label;
@@ -49,41 +48,36 @@ class AppTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: labelStyle ?? AppTextStyles.label),
-        const SizedBox(height: AppSpacing.sm),
-        Semantics(
-          label: label,
-          child: TextFormField(
-            controller: controller,
-            focusNode: focusNode,
-            onTap: onTap,
-            validator: validator,
-            obscureText: obscureText,
-            keyboardType: keyboardType,
-            maxLines: maxLines,
-            enabled: enabled,
-            onChanged: onChanged,
-            autofillHints: autofillHints,
-            textInputAction: textInputAction,
-            textCapitalization: textCapitalization,
-            onFieldSubmitted: onFieldSubmitted,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
-            style: AppTextStyles.body,
-            decoration: InputDecoration(
-              hintText: hint,
-              helperText: helperText,
-              helperMaxLines: 3,
-              errorMaxLines: 3,
-              suffixIcon: suffixIcon,
-              prefixIcon: prefixIcon,
-            ),
-          ),
+    return Semantics(
+      label: label,
+      child: TextFormField(
+        controller: controller,
+        focusNode: focusNode,
+        onTap: onTap,
+        validator: validator,
+        obscureText: obscureText,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        enabled: enabled,
+        onChanged: onChanged,
+        autofillHints: autofillHints,
+        textInputAction: textInputAction,
+        textCapitalization: textCapitalization,
+        onFieldSubmitted: onFieldSubmitted,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+        style: AppTextStyles.body,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: labelStyle,
+          hintText: hint,
+          helperText: helperText,
+          helperMaxLines: 3,
+          errorMaxLines: 3,
+          suffixIcon: suffixIcon,
+          prefixIcon: prefixIcon,
         ),
-      ],
+      ),
     );
   }
 }

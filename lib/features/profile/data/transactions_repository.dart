@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/customer_account_service.dart';
 import '../../shared/models/transaction.dart' as models;
+import '../../shared/models/payment_submission.dart';
 
 // Provides the transactions repository
 final transactionsRepositoryProvider = Provider(
@@ -35,7 +37,9 @@ class TransactionsRepository {
         .eq('customer_id', customerId)
         .isFilter('deleted_at', null)
         .order('created_at', ascending: false);
-    return data.map(models.Transaction.fromJson).toList();
+    return _withCustomerPayments(
+      data.map(models.Transaction.fromJson).toList(),
+    );
   }
 
   /// Non-archived transactions for one service report.
@@ -51,6 +55,41 @@ class TransactionsRepository {
         .eq('customer_id', customerId)
         .isFilter('deleted_at', null)
         .order('created_at', ascending: false);
-    return data.map(models.Transaction.fromJson).toList();
+    return _withCustomerPayments(
+      data.map(models.Transaction.fromJson).toList(),
+    );
+  }
+
+  Future<List<models.Transaction>> _withCustomerPayments(
+    List<models.Transaction> transactions,
+  ) async {
+    if (transactions.isEmpty) return transactions;
+    try {
+      final rows = await _supabase
+          .from('customer_payment_submissions')
+          .select()
+          .inFilter(
+            'transaction_id',
+            transactions.map((transaction) => transaction.id).toList(),
+          )
+          .neq('status', 'superseded')
+          .order('created_at', ascending: false);
+      final latest = <int, PaymentSubmission>{};
+      for (final row in rows) {
+        final submission = PaymentSubmission.fromJson(row);
+        latest.putIfAbsent(submission.transactionId, () => submission);
+      }
+      return transactions
+          .map(
+            (transaction) =>
+                transaction.withCustomerPayment(latest[transaction.id]),
+          )
+          .toList();
+    } on PostgrestException catch (error) {
+      // Existing financial records stay readable before the new migration runs.
+      if (!const {'42P01', 'PGRST205'}.contains(error.code)) rethrow;
+      debugPrint('Customer payment review tables have not been configured.');
+      return transactions;
+    }
   }
 }
